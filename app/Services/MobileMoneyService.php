@@ -520,6 +520,141 @@ class MobileMoneyService
         ];
     }
 
+    public function calculerEnvoiMultiple(int|string $expediteurId, array $numerosDestinataires, int $montantTotal, bool $inclureFraisRetrait = false): array
+    {
+        $numerosDestinataires = array_values(array_unique(array_filter(array_map(
+            static fn (string $numero): string => preg_replace('/\D+/', '', $numero) ?? '',
+            $numerosDestinataires
+        ))));
+
+        if ($numerosDestinataires === []) {
+            throw new InvalidArgumentException('Veuillez saisir au moins un destinataire.');
+        }
+
+        if ($montantTotal <= 0) {
+            throw new InvalidArgumentException('Le montant total doit être supérieur à zéro.');
+        }
+
+        $nombreDestinataires = count($numerosDestinataires);
+
+        if ($montantTotal % $nombreDestinataires !== 0) {
+            throw new InvalidArgumentException("Le montant total n'est pas divisible exactement par le nombre de destinataires.");
+        }
+
+        $montantParDestinataire = intdiv($montantTotal, $nombreDestinataires);
+        $transferts = [];
+        $totalFrais = 0;
+        $totalFraisRetraitInclus = 0;
+        $totalDebit = 0;
+        $totalCommissions = 0;
+        $totalReverser = 0;
+
+        foreach ($numerosDestinataires as $numeroDestinataire) {
+            $calcul = $this->calculerTransfert($expediteurId, $numeroDestinataire, $montantParDestinataire, $inclureFraisRetrait);
+            $transferts[] = $calcul;
+            $totalFrais += (int) $calcul['frais'];
+            $totalFraisRetraitInclus += (int) $calcul['frais_retrait_inclus'];
+            $totalDebit += (int) $calcul['total_debit'];
+            $totalCommissions += (int) $calcul['commission_interoperateur'];
+            $totalReverser += (int) $calcul['montant_reverser'];
+        }
+
+        $expediteur = $transferts[0]['expediteur'];
+
+        if ((int) $expediteur['solde'] < $totalDebit) {
+            throw new RuntimeException('Solde insuffisant pour couvrir tous les transferts et les frais.');
+        }
+
+        return [
+            'id_envoi_multiple' => $this->genererReference(),
+            'expediteur' => $expediteur,
+            'nombre_destinataires' => $nombreDestinataires,
+            'montant_total' => $montantTotal,
+            'montant_par_destinataire' => $montantParDestinataire,
+            'total_frais' => $totalFrais,
+            'total_frais_retrait_inclus' => $totalFraisRetraitInclus,
+            'total_debit' => $totalDebit,
+            'total_commissions' => $totalCommissions,
+            'total_reverser' => $totalReverser,
+            'nouveau_solde_expediteur' => (int) $expediteur['solde'] - $totalDebit,
+            'transferts' => $transferts,
+        ];
+    }
+
+    public function envoyerMultiple(int|string $expediteurId, array $numerosDestinataires, int $montantTotal, bool $inclureFraisRetrait = false): array
+    {
+        $calcul = $this->calculerEnvoiMultiple($expediteurId, $numerosDestinataires, $montantTotal, $inclureFraisRetrait);
+        $expediteur = $calcul['expediteur'];
+        $soldeExpediteurCourant = (int) $expediteur['solde'];
+        $dateOperation = date('Y-m-d H:i:s');
+        $operationIds = [];
+        $idEnvoiMultiple = $calcul['id_envoi_multiple'];
+
+        $this->db->transBegin();
+
+        try {
+            foreach ($calcul['transferts'] as $transfert) {
+                $destinataire = $transfert['destinataire'];
+                $soldeExpediteurCourant -= (int) $transfert['total_debit'];
+                $nouveauSoldeDestinataire = null;
+
+                if ($destinataire !== null) {
+                    $nouveauSoldeDestinataire = (int) $destinataire['solde'] + (int) $transfert['montant_recu'];
+
+                    if (! $this->comptes->update($destinataire['id_compte'], ['solde' => $nouveauSoldeDestinataire])) {
+                        throw new RuntimeException("Le solde d'un destinataire n'a pas pu être mis à jour.");
+                    }
+                }
+
+                $this->operations->insert([
+                    'reference' => $this->genererReference(),
+                    'id_type_operation' => (int) $transfert['type_transfert']['id_type_operation'],
+                    'id_compte_source' => (int) $expediteur['id_compte'],
+                    'id_compte_destination' => $destinataire === null ? null : (int) $destinataire['id_compte'],
+                    'id_operateur_source' => (int) $transfert['operateur_source']['id_operateur'],
+                    'id_operateur_destination' => (int) $transfert['operateur_destination']['id_operateur'],
+                    'numero_destinataire' => $transfert['numero_destinataire'],
+                    'montant' => (int) $transfert['montant'],
+                    'frais' => (int) $transfert['frais'],
+                    'frais_retrait_inclus' => (int) $transfert['frais_retrait_inclus'],
+                    'commission_interoperateur' => (int) $transfert['commission_interoperateur'],
+                    'montant_reverser' => (int) $transfert['montant_reverser'],
+                    'id_envoi_multiple' => $idEnvoiMultiple,
+                    'solde_source_apres' => $soldeExpediteurCourant,
+                    'solde_destination_apres' => $nouveauSoldeDestinataire,
+                    'statut' => 'validee',
+                    'description' => 'Envoi multiple client',
+                    'created_at' => $dateOperation,
+                ], true);
+
+                $operationId = (int) $this->operations->getInsertID();
+
+                if ($operationId <= 0) {
+                    throw new RuntimeException("Un transfert de l'envoi multiple n'a pas pu être enregistré.");
+                }
+
+                $operationIds[] = $operationId;
+            }
+
+            if (! $this->comptes->update($expediteur['id_compte'], ['solde' => $soldeExpediteurCourant])) {
+                throw new RuntimeException("Le solde de l'expéditeur n'a pas pu être mis à jour.");
+            }
+
+            $this->db->transCommit();
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+
+            throw $exception;
+        }
+
+        return [
+            ...$calcul,
+            'id_envoi_multiple' => $idEnvoiMultiple,
+            'operation_ids' => $operationIds,
+            'date_operation' => $dateOperation,
+        ];
+    }
+
     public function recupererTransfertClient(int $operationId, int $compteId): ?array
     {
         return $this->db->table('operations')

@@ -21,6 +21,8 @@ $routes->get('client/retrait/(:num)', 'Client::detailRetrait/$1');
 $routes->get('client/transfert', 'Client::transfert');
 $routes->post('client/transfert', 'Client::enregistrerTransfert');
 $routes->get('client/transfert/(:num)', 'Client::detailTransfert/$1');
+$routes->get('client/envoi-multiple', 'Client::envoiMultiple');
+$routes->post('client/envoi-multiple', 'Client::enregistrerEnvoiMultiple');
 $routes->get('client/historique', 'Client::historique');
 
 $routes->group('operateur', ['namespace' => 'App\Controllers'], static function ($routes) {
@@ -30,6 +32,13 @@ $routes->group('operateur', ['namespace' => 'App\Controllers'], static function 
     $routes->get('retraits', 'Operateur::retraits');
     $routes->get('transferts', 'Operateur::transferts');
     $routes->get('gains', 'Operateur::gains');
+    $routes->get('reversements', 'Operateur::reversements');
+    $routes->get('operateurs-externes', 'Operateur::operateursExternes');
+    $routes->get('operateurs-externes/nouveau', 'Operateur::newOperateurExterne');
+    $routes->post('operateurs-externes', 'Operateur::createOperateurExterne');
+    $routes->get('operateurs-externes/(:num)/modifier', 'Operateur::editOperateurExterne/$1');
+    $routes->post('operateurs-externes/(:num)', 'Operateur::updateOperateurExterne/$1');
+    $routes->post('operateurs-externes/(:num)/basculer', 'Operateur::toggleOperateurExterne/$1');
 
     $routes->get('prefixes', 'Operateur::prefixes');
     $routes->get('prefixes/nouveau', 'Operateur::newPrefixe');

@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Models\BaremeFraisModel;
 use App\Models\CompteMobileMoneyModel;
+use App\Models\OperateurMobileMoneyModel;
 use App\Models\PrefixeTelephoniqueModel;
 use App\Models\TypeOperationModel;
 use CodeIgniter\Database\Exceptions\DatabaseException;
@@ -14,6 +15,7 @@ class Operateur extends BaseController
     private TypeOperationModel $types;
     private BaremeFraisModel $baremes;
     private CompteMobileMoneyModel $comptes;
+    private OperateurMobileMoneyModel $operateurs;
 
     public function __construct()
     {
@@ -21,6 +23,7 @@ class Operateur extends BaseController
         $this->types = new TypeOperationModel();
         $this->baremes = new BaremeFraisModel();
         $this->comptes = new CompteMobileMoneyModel();
+        $this->operateurs = new OperateurMobileMoneyModel();
     }
 
     public function login()
@@ -417,24 +420,178 @@ class Operateur extends BaseController
             return $redirect;
         }
 
-        $operations = db_connect()->table('operations')
-            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
-            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
-            ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
-            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
-            ->whereIn('types_operations.code', ['retrait', 'transfert'])
-            ->where('operations.statut', 'validee')
-            ->orderBy('operations.created_at', 'DESC')
-            ->orderBy('operations.id_operation', 'DESC')
+        $situation = $this->calculerSituationGains();
+
+        return view('operateur/gains/index', [
+            ...$situation,
+        ]);
+    }
+
+    public function reversements()
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $dateDebut = trim((string) $this->request->getGet('date_debut'));
+        $dateFin = trim((string) $this->request->getGet('date_fin'));
+
+        return view('operateur/reversements/index', [
+            'dateDebut' => $dateDebut,
+            'dateFin' => $dateFin,
+            'periode' => $this->libellePeriode($dateDebut, $dateFin),
+            'operateurs' => $this->situationParOperateurExterne($dateDebut, $dateFin),
+        ]);
+    }
+
+    public function operateursExternes()
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $operateurs = db_connect()->table('operateurs')
+            ->select('operateurs.*, GROUP_CONCAT(prefixes_telephoniques.prefixe, ", ") AS prefixes')
+            ->join('prefixes_telephoniques', 'prefixes_telephoniques.id_operateur = operateurs.id_operateur', 'left')
+            ->groupBy('operateurs.id_operateur')
+            ->orderBy('operateurs.principal', 'DESC')
+            ->orderBy('operateurs.nom', 'ASC')
             ->get()
             ->getResultArray();
 
-        return view('operateur/gains/index', [
-            'operations' => $operations,
-            'gainTotal' => array_sum(array_map(static fn (array $operation): int => (int) $operation['frais'], $operations)),
-            'gainRetrait' => $this->totalFraisParType('retrait'),
-            'gainTransfert' => $this->totalFraisParType('transfert'),
+        return view('operateur/operateurs_externes/index', [
+            'operateurs' => $operateurs,
         ]);
+    }
+
+    public function newOperateurExterne()
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        return view('operateur/operateurs_externes/form', [
+            'operateur' => null,
+            'prefixes' => '',
+            'errors' => session('errors') ?? [],
+        ]);
+    }
+
+    public function createOperateurExterne()
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $data = $this->operateurData();
+        $prefixes = $this->normaliserPrefixes((string) $this->request->getPost('prefixes'));
+        $errors = $this->validateOperateurData($data, $prefixes);
+
+        if ($errors !== []) {
+            return redirect()->back()->withInput()->with('errors', $errors);
+        }
+
+        $db = db_connect();
+        $db->transBegin();
+
+        try {
+            $this->operateurs->insert($data);
+            $operateurId = (int) $this->operateurs->getInsertID();
+            $this->enregistrerPrefixesOperateur($operateurId, $data['nom'], $prefixes);
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+
+            return redirect()->back()->withInput()->with('error', "L'opérateur n'a pas pu être ajouté.");
+        }
+
+        return redirect()->to('/operateur/operateurs-externes')->with('success', 'Opérateur ajouté avec succès.');
+    }
+
+    public function editOperateurExterne(int $id)
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $operateur = $this->operateurs->find($id);
+
+        if ($operateur === null) {
+            throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound('Opérateur introuvable.');
+        }
+
+        $prefixes = implode("\n", array_column($this->prefixes->where('id_operateur', $id)->orderBy('prefixe', 'ASC')->findAll(), 'prefixe'));
+
+        return view('operateur/operateurs_externes/form', [
+            'operateur' => $operateur,
+            'prefixes' => $prefixes,
+            'errors' => session('errors') ?? [],
+        ]);
+    }
+
+    public function updateOperateurExterne(int $id)
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        if ($this->operateurs->find($id) === null) {
+            throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound('Opérateur introuvable.');
+        }
+
+        $data = $this->operateurData();
+        $prefixes = $this->normaliserPrefixes((string) $this->request->getPost('prefixes'));
+        $errors = $this->validateOperateurData($data, $prefixes, $id);
+
+        if ($errors !== []) {
+            return redirect()->back()->withInput()->with('errors', $errors);
+        }
+
+        $db = db_connect();
+        $db->transBegin();
+
+        try {
+            $this->operateurs->update($id, $data);
+            $this->enregistrerPrefixesOperateur($id, $data['nom'], $prefixes);
+            $db->transCommit();
+        } catch (\Throwable $exception) {
+            $db->transRollback();
+
+            return redirect()->back()->withInput()->with('error', "L'opérateur n'a pas pu être modifié.");
+        }
+
+        return redirect()->to('/operateur/operateurs-externes')->with('success', 'Opérateur modifié avec succès.');
+    }
+
+    public function toggleOperateurExterne(int $id)
+    {
+        $redirect = $this->exigerAdmin();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $operateur = $this->operateurs->find($id);
+
+        if ($operateur === null) {
+            throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound('Opérateur introuvable.');
+        }
+
+        $this->operateurs->update($id, ['actif' => (int) ! (bool) $operateur['actif']]);
+
+        return redirect()->to('/operateur/operateurs-externes')->with('success', 'Statut de l’opérateur mis à jour.');
     }
 
 
@@ -448,6 +605,95 @@ class Operateur extends BaseController
             'operateur' => $operateur,
             'actif' => (int) ($this->request->getPost('actif') === '1'),
         ];
+    }
+
+    private function operateurData(): array
+    {
+        return [
+            'code' => strtoupper(trim((string) $this->request->getPost('code'))),
+            'nom' => trim((string) $this->request->getPost('nom')),
+            'principal' => (int) ($this->request->getPost('principal') === '1'),
+            'commission_transfert_externe' => (float) str_replace(',', '.', (string) $this->request->getPost('commission_transfert_externe')),
+            'actif' => (int) ($this->request->getPost('actif') === '1'),
+        ];
+    }
+
+    private function validateOperateurData(array $data, array $prefixes, ?int $ignoredId = null): array
+    {
+        $errors = [];
+
+        if ($data['nom'] === '') {
+            $errors['nom'] = 'Le nom est obligatoire.';
+        }
+
+        if ($data['code'] === '') {
+            $errors['code'] = 'Le code est obligatoire.';
+        } elseif (! preg_match('/^[A-Z0-9_-]+$/', $data['code'])) {
+            $errors['code'] = 'Le code doit contenir uniquement lettres, chiffres, tirets ou soulignés.';
+        } else {
+            $query = $this->operateurs->where('code', $data['code']);
+
+            if ($ignoredId !== null) {
+                $query->where('id_operateur !=', $ignoredId);
+            }
+
+            if ($query->first() !== null) {
+                $errors['code'] = 'Ce code est déjà utilisé.';
+            }
+        }
+
+        if ($data['commission_transfert_externe'] < 0 || $data['commission_transfert_externe'] > 100) {
+            $errors['commission_transfert_externe'] = 'Le pourcentage de commission doit être compris entre 0 et 100.';
+        }
+
+        if (count($prefixes) !== count(array_unique($prefixes))) {
+            $errors['prefixes'] = 'Les préfixes doivent être uniques.';
+        }
+
+        foreach ($prefixes as $prefixe) {
+            if (! preg_match('/^03[0-9]$/', $prefixe)) {
+                $errors['prefixes'] = 'Chaque préfixe doit avoir le format 03x.';
+
+                break;
+            }
+
+            $prefixeExistant = $this->prefixes->where('prefixe', $prefixe)->first();
+
+            if ($prefixeExistant !== null && ! empty($prefixeExistant['id_operateur']) && (int) $prefixeExistant['id_operateur'] !== (int) ($ignoredId ?? 0)) {
+                $errors['prefixes'] = 'Le préfixe ' . $prefixe . ' appartient déjà à un autre opérateur.';
+
+                break;
+            }
+        }
+
+        return $errors;
+    }
+
+    private function normaliserPrefixes(string $prefixes): array
+    {
+        return array_values(array_filter(array_map(
+            static fn (string $prefixe): string => trim($prefixe),
+            preg_split('/[\s,;]+/', $prefixes) ?: []
+        )));
+    }
+
+    private function enregistrerPrefixesOperateur(int $operateurId, string $nomOperateur, array $prefixes): void
+    {
+        foreach ($prefixes as $prefixe) {
+            $prefixeExistant = $this->prefixes->where('prefixe', $prefixe)->first();
+            $data = [
+                'id_operateur' => $operateurId,
+                'prefixe' => $prefixe,
+                'operateur' => $nomOperateur,
+                'actif' => 1,
+            ];
+
+            if ($prefixeExistant === null) {
+                $this->prefixes->insert($data);
+            } else {
+                $this->prefixes->update($prefixeExistant['id_prefixe'], $data);
+            }
+        }
     }
 
     private function validatePrefixe(array $data, ?int $id = null): bool
@@ -545,6 +791,92 @@ class Operateur extends BaseController
         return (int) ($result['total_frais'] ?? 0);
     }
 
+    private function calculerSituationGains(): array
+    {
+        $fraisRetrait = $this->totalFraisParType('retrait');
+        $fraisTransfert = $this->totalFraisParType('transfert');
+        $fraisTransfertInterne = $this->totalFraisTransfertInterne();
+        $commissionsExternes = $this->totalColonneTransfertExterne('commission_interoperateur');
+        $montantsReverser = $this->totalColonneTransfertExterne('montant_reverser');
+
+        return [
+            'gainsInternes' => $fraisRetrait + $fraisTransfertInterne,
+            'gainRetrait' => $fraisRetrait,
+            'gainTransfert' => $fraisTransfert,
+            'commissionsExternes' => $commissionsExternes,
+            'montantsReverser' => $montantsReverser,
+            'gainTotal' => $fraisRetrait + $fraisTransfert + $commissionsExternes,
+            'operateurs' => $this->situationParOperateurExterne('', ''),
+        ];
+    }
+
+    private function totalFraisTransfertInterne(): int
+    {
+        $result = db_connect()->table('operations')
+            ->selectSum('operations.frais', 'total')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->where('types_operations.code', 'transfert')
+            ->where('operations.statut', 'validee')
+            ->where('operations.montant_reverser', 0)
+            ->get()
+            ->getRowArray();
+
+        return (int) ($result['total'] ?? 0);
+    }
+
+    private function totalColonneTransfertExterne(string $colonne): int
+    {
+        $result = db_connect()->table('operations')
+            ->selectSum('operations.' . $colonne, 'total')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->where('types_operations.code', 'transfert')
+            ->where('operations.statut', 'validee')
+            ->where('operations.montant_reverser >', 0)
+            ->get()
+            ->getRowArray();
+
+        return (int) ($result['total'] ?? 0);
+    }
+
+    private function situationParOperateurExterne(string $dateDebut, string $dateFin): array
+    {
+        $db = db_connect();
+        $builder = $db->table('operations')
+            ->select('operateurs.nom, COUNT(operations.id_operation) AS nombre_transferts, COALESCE(SUM(operations.montant), 0) AS montant_total, COALESCE(SUM(operations.frais), 0) AS frais_generes, COALESCE(SUM(operations.commission_interoperateur), 0) AS commission_conservee, COALESCE(SUM(operations.montant_reverser), 0) AS montant_reverser')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->join('operateurs', 'operateurs.id_operateur = operations.id_operateur_destination')
+            ->where('types_operations.code', 'transfert')
+            ->where('operations.statut', 'validee')
+            ->where('operations.montant_reverser >', 0);
+
+        if ($dateDebut !== '') {
+            $builder->where('date(operations.created_at) >= ' . $db->escape($dateDebut), null, false);
+        }
+
+        if ($dateFin !== '') {
+            $builder->where('date(operations.created_at) <= ' . $db->escape($dateFin), null, false);
+        }
+
+        return $builder
+            ->groupBy('operateurs.id_operateur')
+            ->orderBy('operateurs.nom', 'ASC')
+            ->get()
+            ->getResultArray();
+    }
+
+    private function libellePeriode(string $dateDebut, string $dateFin): string
+    {
+        if ($dateDebut === '' && $dateFin === '') {
+            return 'Toutes les périodes';
+        }
+
+        if ($dateDebut !== '' && $dateFin !== '') {
+            return $dateDebut . ' au ' . $dateFin;
+        }
+
+        return $dateDebut !== '' ? 'Depuis ' . $dateDebut : 'Jusqu’au ' . $dateFin;
+    }
+
     private function nombreOperationsParType(string $code): int
     {
         return db_connect()->table('operations')
@@ -573,6 +905,7 @@ class Operateur extends BaseController
         }
 
         $db->table('operateurs')->insert([
+            'code' => $this->genererCodeOperateur($nom),
             'nom' => $nom,
             'principal' => 0,
             'commission_transfert_externe' => 0,
@@ -580,5 +913,20 @@ class Operateur extends BaseController
         ]);
 
         return (int) $db->insertID();
+    }
+
+    private function genererCodeOperateur(string $nom): string
+    {
+        $base = strtoupper(preg_replace('/[^A-Z0-9]+/i', '_', trim($nom)) ?: 'OPERATEUR');
+        $base = trim($base, '_') ?: 'OPERATEUR';
+        $code = $base;
+        $suffixe = 1;
+
+        while ($this->operateurs->where('code', $code)->first() !== null) {
+            $suffixe++;
+            $code = $base . '_' . $suffixe;
+        }
+
+        return $code;
     }
 }

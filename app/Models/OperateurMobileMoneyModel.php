@@ -10,6 +10,7 @@ class OperateurMobileMoneyModel extends Model
     protected $primaryKey = 'id_operateur';
     protected $returnType = 'array';
     protected $allowedFields = [
+        'code',
         'nom',
         'principal',
         'commission_transfert_externe',
