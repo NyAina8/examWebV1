@@ -168,6 +168,7 @@ class Client extends BaseController
         return view('client/transfert', [
             'compte' => $compte,
             'errors' => session('errors') ?? [],
+            'apercu' => session('apercu') ?? null,
         ]);
     }
 
@@ -289,6 +290,7 @@ class Client extends BaseController
 
         $numeroDestinataire = $this->normaliserNumero((string) $this->request->getPost('numero_destinataire'));
         $montant = $this->normaliserMontant((string) $this->request->getPost('montant'));
+        $inclureFraisRetrait = $this->request->getPost('inclure_frais_retrait') === '1';
         $errors = $this->validerTransfert($numeroDestinataire, $montant);
 
         if ($errors !== []) {
@@ -298,7 +300,15 @@ class Client extends BaseController
         }
 
         try {
-            $resultat = $this->mobileMoney->transferer((int) session('compte_id'), $numeroDestinataire, (int) $montant);
+            $apercu = $this->mobileMoney->calculerTransfert((int) session('compte_id'), $numeroDestinataire, (int) $montant, $inclureFraisRetrait);
+
+            if ($this->request->getPost('confirmer') !== '1') {
+                return redirect()->back()
+                    ->withInput()
+                    ->with('apercu', $apercu);
+            }
+
+            $resultat = $this->mobileMoney->transferer((int) session('compte_id'), $numeroDestinataire, (int) $montant, $inclureFraisRetrait);
         } catch (InvalidArgumentException | RuntimeException $exception) {
             return redirect()->back()
                 ->withInput()

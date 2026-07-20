@@ -6,6 +6,7 @@ use App\Models\CompteMobileMoneyModel;
 use App\Models\ClientModel;
 use App\Models\OperationModel;
 use App\Models\BaremeFraisModel;
+use App\Models\OperateurMobileMoneyModel;
 use App\Models\PrefixeTelephoniqueModel;
 use App\Models\TypeOperationModel;
 use CodeIgniter\Database\BaseConnection;
@@ -20,6 +21,7 @@ class MobileMoneyService
     private CompteMobileMoneyModel $comptes;
     private OperationModel $operations;
     private BaremeFraisModel $baremesFrais;
+    private OperateurMobileMoneyModel $operateurs;
     private PrefixeTelephoniqueModel $prefixes;
     private TypeOperationModel $typesOperations;
 
@@ -30,6 +32,7 @@ class MobileMoneyService
         $this->comptes = new CompteMobileMoneyModel($this->db);
         $this->operations = new OperationModel($this->db);
         $this->baremesFrais = new BaremeFraisModel($this->db);
+        $this->operateurs = new OperateurMobileMoneyModel($this->db);
         $this->prefixes = new PrefixeTelephoniqueModel($this->db);
         $this->typesOperations = new TypeOperationModel($this->db);
     }
@@ -56,9 +59,10 @@ class MobileMoneyService
         }
 
         return $this->db->table('comptes_mobile_money')
-            ->select('comptes_mobile_money.*, clients.nom, clients.prenom, clients.email, prefixes_telephoniques.prefixe, prefixes_telephoniques.operateur')
+            ->select('comptes_mobile_money.*, clients.nom, clients.prenom, clients.email, prefixes_telephoniques.prefixe, prefixes_telephoniques.operateur, prefixes_telephoniques.id_operateur, operateurs.nom AS nom_operateur')
             ->join('clients', 'clients.id_client = comptes_mobile_money.id_client')
             ->join('prefixes_telephoniques', 'prefixes_telephoniques.id_prefixe = comptes_mobile_money.id_prefixe')
+            ->join('operateurs', 'operateurs.id_operateur = prefixes_telephoniques.id_operateur', 'left')
             ->where('comptes_mobile_money.id_compte', $compte['id_compte'])
             ->get()
             ->getRowArray();
@@ -341,7 +345,7 @@ class MobileMoneyService
             ->getRowArray();
     }
 
-    public function transferer(int|string $expediteurId, string $numeroDestinataire, int $montant): array
+    public function calculerTransfert(int|string $expediteurId, string $numeroDestinataire, int $montant, bool $inclureFraisRetrait = false): array
     {
         if ($montant <= 0) {
             throw new InvalidArgumentException('Le montant du transfert doit être supérieur à zéro.');
@@ -351,7 +355,9 @@ class MobileMoneyService
             throw new InvalidArgumentException('Le numéro du destinataire est invalide.');
         }
 
-        if ($this->prefixes->findActiveForNumero($numeroDestinataire) === null) {
+        $operateurDestination = $this->recupererOperateurParNumero($numeroDestinataire);
+
+        if ($operateurDestination === null) {
             throw new RuntimeException('Le préfixe du destinataire n’est pas actif.');
         }
 
@@ -365,17 +371,25 @@ class MobileMoneyService
             throw new RuntimeException('Votre compte est désactivé.');
         }
 
+        $operateurSource = $this->recupererOperateurParPrefixe((int) $expediteur['id_prefixe']);
+
+        if ($operateurSource === null) {
+            throw new RuntimeException("L'opérateur source est introuvable ou inactif.");
+        }
+
         $destinataire = $this->recupererCompte($numeroDestinataire);
 
-        if ($destinataire === null) {
+        $transfertExterne = (int) $operateurSource['id_operateur'] !== (int) $operateurDestination['id_operateur'];
+
+        if ($destinataire === null && ! $transfertExterne) {
             throw new RuntimeException('Le compte destinataire est introuvable.');
         }
 
-        if ($destinataire['statut'] !== 'actif') {
+        if ($destinataire !== null && $destinataire['statut'] !== 'actif') {
             throw new RuntimeException('Le compte destinataire est désactivé.');
         }
 
-        if ((int) $expediteur['id_compte'] === (int) $destinataire['id_compte']) {
+        if ($destinataire !== null && (int) $expediteur['id_compte'] === (int) $destinataire['id_compte']) {
             throw new InvalidArgumentException('Vous ne pouvez pas transférer vers votre propre numéro.');
         }
 
@@ -389,26 +403,64 @@ class MobileMoneyService
         }
 
         $bareme = $this->baremesFrais->findForAmount((int) $typeTransfert['id_type_operation'], $montant);
-        $frais = $bareme === null ? 0 : (int) $bareme['frais'];
+        $fraisTransfert = $bareme === null ? 0 : (int) $bareme['frais'];
 
-        if ($montant > PHP_INT_MAX - $frais) {
+        $typeRetrait = $this->typesOperations
+            ->where('code', 'retrait')
+            ->where('actif', 1)
+            ->first();
+        $baremeRetrait = $typeRetrait === null ? null : $this->baremesFrais->findForAmount((int) $typeRetrait['id_type_operation'], $montant);
+        $fraisRetraitInclus = $inclureFraisRetrait && $baremeRetrait !== null ? (int) $baremeRetrait['frais'] : 0;
+        $montantRecu = $montant + $fraisRetraitInclus;
+        $commission = $transfertExterne ? (int) round($montant * ((float) $operateurDestination['commission_transfert_externe'] / 100)) : 0;
+        $montantReverser = $transfertExterne ? $montantRecu + $commission : 0;
+
+        if ($montant > PHP_INT_MAX - $fraisTransfert || $montant + $fraisTransfert > PHP_INT_MAX - $fraisRetraitInclus) {
             throw new InvalidArgumentException('Le montant et les frais dépassent les limites du système.');
         }
 
-        $totalDebit = $montant + $frais;
+        $totalDebit = $montant + $fraisTransfert + $fraisRetraitInclus;
         $ancienSoldeExpediteur = (int) $expediteur['solde'];
-        $ancienSoldeDestinataire = (int) $destinataire['solde'];
+        $ancienSoldeDestinataire = $destinataire === null ? null : (int) $destinataire['solde'];
 
         if ($ancienSoldeExpediteur < $totalDebit) {
             throw new RuntimeException('Solde insuffisant pour couvrir le transfert et les frais.');
         }
 
-        if ($montant > PHP_INT_MAX - $ancienSoldeDestinataire) {
+        if ($destinataire !== null && $montantRecu > PHP_INT_MAX - $ancienSoldeDestinataire) {
             throw new InvalidArgumentException('Le crédit destinataire dépasse les limites du système.');
         }
 
-        $nouveauSoldeExpediteur = $ancienSoldeExpediteur - $totalDebit;
-        $nouveauSoldeDestinataire = $ancienSoldeDestinataire + $montant;
+        return [
+            'expediteur' => $expediteur,
+            'destinataire' => $destinataire,
+            'numero_destinataire' => $numeroDestinataire,
+            'type_transfert' => $typeTransfert,
+            'operateur_source' => $operateurSource,
+            'operateur_destination' => $operateurDestination,
+            'transfert_externe' => $transfertExterne,
+            'montant' => $montant,
+            'montant_recu' => $montantRecu,
+            'frais' => $fraisTransfert,
+            'frais_retrait_inclus' => $fraisRetraitInclus,
+            'commission_interoperateur' => $commission,
+            'montant_reverser' => $montantReverser,
+            'total_debit' => $totalDebit,
+            'ancien_solde_expediteur' => $ancienSoldeExpediteur,
+            'ancien_solde_destinataire' => $ancienSoldeDestinataire,
+            'nouveau_solde_expediteur' => $ancienSoldeExpediteur - $totalDebit,
+            'nouveau_solde_destinataire' => $destinataire === null ? null : $ancienSoldeDestinataire + $montantRecu,
+        ];
+    }
+
+    public function transferer(int|string $expediteurId, string $numeroDestinataire, int $montant, bool $inclureFraisRetrait = false): array
+    {
+        $calcul = $this->calculerTransfert($expediteurId, $numeroDestinataire, $montant, $inclureFraisRetrait);
+        $expediteur = $calcul['expediteur'];
+        $destinataire = $calcul['destinataire'];
+        $typeTransfert = $calcul['type_transfert'];
+        $nouveauSoldeExpediteur = $calcul['nouveau_solde_expediteur'];
+        $nouveauSoldeDestinataire = $calcul['nouveau_solde_destinataire'];
         $dateOperation = date('Y-m-d H:i:s');
 
         $this->db->transBegin();
@@ -420,19 +472,27 @@ class MobileMoneyService
                 throw new RuntimeException("Le solde de l'expéditeur n'a pas pu être mis à jour.");
             }
 
-            $creditEffectue = $this->comptes->update($destinataire['id_compte'], ['solde' => $nouveauSoldeDestinataire]);
+            if ($destinataire !== null) {
+                $creditEffectue = $this->comptes->update($destinataire['id_compte'], ['solde' => $nouveauSoldeDestinataire]);
 
-            if (! $creditEffectue) {
-                throw new RuntimeException("Le solde du destinataire n'a pas pu être mis à jour.");
+                if (! $creditEffectue) {
+                    throw new RuntimeException("Le solde du destinataire n'a pas pu être mis à jour.");
+                }
             }
 
             $this->operations->insert([
                 'reference' => $this->genererReference(),
                 'id_type_operation' => (int) $typeTransfert['id_type_operation'],
                 'id_compte_source' => (int) $expediteur['id_compte'],
-                'id_compte_destination' => (int) $destinataire['id_compte'],
+                'id_compte_destination' => $destinataire === null ? null : (int) $destinataire['id_compte'],
+                'id_operateur_source' => (int) $calcul['operateur_source']['id_operateur'],
+                'id_operateur_destination' => (int) $calcul['operateur_destination']['id_operateur'],
+                'numero_destinataire' => $numeroDestinataire,
                 'montant' => $montant,
-                'frais' => $frais,
+                'frais' => $calcul['frais'],
+                'frais_retrait_inclus' => $calcul['frais_retrait_inclus'],
+                'commission_interoperateur' => $calcul['commission_interoperateur'],
+                'montant_reverser' => $calcul['montant_reverser'],
                 'solde_source_apres' => $nouveauSoldeExpediteur,
                 'solde_destination_apres' => $nouveauSoldeDestinataire,
                 'statut' => 'validee',
@@ -455,14 +515,7 @@ class MobileMoneyService
 
         return [
             'id_operation' => $operationId,
-            'numero_destinataire' => $numeroDestinataire,
-            'ancien_solde_expediteur' => $ancienSoldeExpediteur,
-            'ancien_solde_destinataire' => $ancienSoldeDestinataire,
-            'montant' => $montant,
-            'frais' => $frais,
-            'total_debit' => $totalDebit,
-            'nouveau_solde_expediteur' => $nouveauSoldeExpediteur,
-            'nouveau_solde_destinataire' => $nouveauSoldeDestinataire,
+            ...$calcul,
             'date_operation' => $dateOperation,
         ];
     }
@@ -470,10 +523,12 @@ class MobileMoneyService
     public function recupererTransfertClient(int $operationId, int $compteId): ?array
     {
         return $this->db->table('operations')
-            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination, operateur_source.nom AS operateur_source, operateur_destination.nom AS operateur_destination')
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source')
-            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination')
+            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
+            ->join('operateurs AS operateur_source', 'operateur_source.id_operateur = operations.id_operateur_source', 'left')
+            ->join('operateurs AS operateur_destination', 'operateur_destination.id_operateur = operations.id_operateur_destination', 'left')
             ->where('operations.id_operation', $operationId)
             ->where('operations.id_compte_source', $compteId)
             ->where('types_operations.code', 'transfert')
@@ -496,7 +551,7 @@ class MobileMoneyService
         $total = $countBuilder->countAllResults();
 
         $operations = $this->db->table('operations')
-            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination')
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
             ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
@@ -525,7 +580,7 @@ class MobileMoneyService
     public function recupererEvolutionSoldeClient(int $compteId): array
     {
         $operations = $this->db->table('operations')
-            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination')
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
             ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
@@ -602,6 +657,31 @@ class MobileMoneyService
         $operation['solde_apres'] = $operation['solde_source_apres'];
 
         return $operation;
+    }
+
+    private function recupererOperateurParNumero(string $numeroTelephone): ?array
+    {
+        return $this->db->table('prefixes_telephoniques')
+            ->select('operateurs.*, prefixes_telephoniques.id_prefixe, prefixes_telephoniques.prefixe')
+            ->join('operateurs', 'operateurs.id_operateur = prefixes_telephoniques.id_operateur')
+            ->where('prefixes_telephoniques.actif', 1)
+            ->where('operateurs.actif', 1)
+            ->where("'" . $this->db->escapeLikeString($numeroTelephone) . "' LIKE prefixes_telephoniques.prefixe || '%'", null, false)
+            ->orderBy('length(prefixes_telephoniques.prefixe)', 'DESC', false)
+            ->get()
+            ->getRowArray();
+    }
+
+    private function recupererOperateurParPrefixe(int $prefixeId): ?array
+    {
+        return $this->db->table('prefixes_telephoniques')
+            ->select('operateurs.*, prefixes_telephoniques.id_prefixe, prefixes_telephoniques.prefixe')
+            ->join('operateurs', 'operateurs.id_operateur = prefixes_telephoniques.id_operateur')
+            ->where('prefixes_telephoniques.id_prefixe', $prefixeId)
+            ->where('prefixes_telephoniques.actif', 1)
+            ->where('operateurs.actif', 1)
+            ->get()
+            ->getRowArray();
     }
 
     private function genererReference(): string

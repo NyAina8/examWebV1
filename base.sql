@@ -6,6 +6,18 @@ DROP TABLE IF EXISTS comptes_mobile_money;
 DROP TABLE IF EXISTS clients;
 DROP TABLE IF EXISTS types_operations;
 DROP TABLE IF EXISTS prefixes_telephoniques;
+DROP TABLE IF EXISTS operateurs;
+
+CREATE TABLE operateurs (
+    id_operateur INTEGER PRIMARY KEY AUTOINCREMENT,
+    nom TEXT NOT NULL UNIQUE,
+    principal INTEGER NOT NULL DEFAULT 0 CHECK (principal IN (0, 1)),
+    commission_transfert_externe REAL NOT NULL DEFAULT 0 CHECK (commission_transfert_externe >= 0),
+    actif INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT,
+    CHECK (length(trim(nom)) > 0)
+);
 
 CREATE TABLE clients (
     id_client INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,11 +32,15 @@ CREATE TABLE clients (
 
 CREATE TABLE prefixes_telephoniques (
     id_prefixe INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_operateur INTEGER NOT NULL,
     prefixe TEXT NOT NULL UNIQUE,
     operateur TEXT NOT NULL,
     actif INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT,
+    FOREIGN KEY (id_operateur) REFERENCES operateurs(id_operateur)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
     CHECK (prefixe GLOB '03[0-9]'),
     CHECK (length(trim(operateur)) > 0)
 );
@@ -79,8 +95,15 @@ CREATE TABLE operations (
     id_type_operation INTEGER NOT NULL,
     id_compte_source INTEGER,
     id_compte_destination INTEGER,
+    id_operateur_source INTEGER,
+    id_operateur_destination INTEGER,
+    numero_destinataire TEXT,
     montant INTEGER NOT NULL CHECK (montant > 0),
     frais INTEGER NOT NULL DEFAULT 0 CHECK (frais >= 0),
+    frais_retrait_inclus INTEGER NOT NULL DEFAULT 0 CHECK (frais_retrait_inclus >= 0),
+    commission_interoperateur INTEGER NOT NULL DEFAULT 0 CHECK (commission_interoperateur >= 0),
+    montant_reverser INTEGER NOT NULL DEFAULT 0 CHECK (montant_reverser >= 0),
+    id_envoi_multiple TEXT,
     solde_source_apres INTEGER CHECK (solde_source_apres IS NULL OR solde_source_apres >= 0),
     solde_destination_apres INTEGER CHECK (solde_destination_apres IS NULL OR solde_destination_apres >= 0),
     statut TEXT NOT NULL DEFAULT 'validee' CHECK (statut IN ('validee', 'annulee')),
@@ -95,6 +118,12 @@ CREATE TABLE operations (
     FOREIGN KEY (id_compte_destination) REFERENCES comptes_mobile_money(id_compte)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
+    FOREIGN KEY (id_operateur_source) REFERENCES operateurs(id_operateur)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    FOREIGN KEY (id_operateur_destination) REFERENCES operateurs(id_operateur)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
     CHECK (id_compte_source IS NOT NULL OR id_compte_destination IS NOT NULL),
     CHECK (id_compte_source IS NULL OR id_compte_destination IS NULL OR id_compte_source <> id_compte_destination)
 );
@@ -105,13 +134,20 @@ CREATE INDEX idx_baremes_frais_type_montants ON baremes_frais(id_type_operation,
 CREATE INDEX idx_operations_source_date ON operations(id_compte_source, created_at);
 CREATE INDEX idx_operations_destination_date ON operations(id_compte_destination, created_at);
 CREATE INDEX idx_operations_type ON operations(id_type_operation);
+CREATE INDEX idx_operations_operateurs ON operations(id_operateur_source, id_operateur_destination);
 
-INSERT INTO prefixes_telephoniques (id_prefixe, prefixe, operateur) VALUES
-    (1, '032', 'Orange Money'),
-    (2, '033', 'Airtel Money'),
-    (3, '034', 'MVola'),
-    (4, '037', 'Telma Money'),
-    (5, '038', 'MVola');
+INSERT INTO operateurs (id_operateur, nom, principal, commission_transfert_externe, actif) VALUES
+    (1, 'MVola', 1, 0, 1),
+    (2, 'Orange Money', 0, 2.5, 1),
+    (3, 'Airtel Money', 0, 2, 1),
+    (4, 'Telma Money', 0, 1.5, 1);
+
+INSERT INTO prefixes_telephoniques (id_prefixe, id_operateur, prefixe, operateur) VALUES
+    (1, 2, '032', 'Orange Money'),
+    (2, 3, '033', 'Airtel Money'),
+    (3, 1, '034', 'MVola'),
+    (4, 4, '037', 'Telma Money'),
+    (5, 1, '038', 'MVola');
 
 INSERT INTO types_operations (id_type_operation, code, libelle) VALUES
     (1, 'depot', 'Dépôt'),
