@@ -6,6 +6,12 @@ use CodeIgniter\Router\RouteCollection;
  * @var RouteCollection $routes
  */
 $routes->get('/', 'Home::index');
+$routes->get('connexion', 'Client::login');
+$routes->post('connexion', 'Client::authenticate');
+$routes->get('deconnexion', 'Client::logout');
+$routes->get('client', 'Client::dashboard');
+$routes->get('client/depot', 'Client::depot');
+$routes->post('client/depot', 'Client::enregistrerDepot');
 
 $routes->group('operateur', ['namespace' => 'App\Controllers'], static function ($routes) {
     $routes->get('/', 'Operateur::index');

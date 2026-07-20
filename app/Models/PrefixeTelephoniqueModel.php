@@ -17,4 +17,15 @@ class PrefixeTelephoniqueModel extends Model
     protected $useTimestamps = true;
     protected $createdField = 'created_at';
     protected $updatedField = 'updated_at';
+
+    public function findActiveForNumero(string $numeroTelephone): ?array
+    {
+        foreach ($this->where('actif', 1)->orderBy('prefixe', 'DESC')->findAll() as $prefixe) {
+            if (str_starts_with($numeroTelephone, $prefixe['prefixe'])) {
+                return $prefixe;
+            }
+        }
+
+        return null;
+    }
 }
