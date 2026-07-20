@@ -7,7 +7,7 @@
             <div class="card-body p-4">
                 <div class="d-flex justify-content-between align-items-start mb-3">
                     <div>
-                        <h1 class="h3 mb-1">Envoi multiple</h1>
+                        <h1 class="h3 mb-1">Transfert</h1>
                         <p class="text-muted mb-0"><?= esc($compte['numero_telephone']) ?></p>
                     </div>
                     <span class="badge text-bg-success">Solde : <?= number_format((int) $compte['solde'], 0, ',', ' ') ?> Ar</span>

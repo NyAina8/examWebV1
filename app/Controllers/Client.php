@@ -307,7 +307,7 @@ class Client extends BaseController
         } catch (\Throwable) {
             return redirect()->back()
                 ->withInput()
-                ->with('error', "L'envoi multiple n'a pas pu être enregistré.");
+                ->with('error', "Le transfert n'a pas pu être enregistré.");
         }
 
         return view('client/envoi_multiple_detail', [

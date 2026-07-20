@@ -5,7 +5,7 @@
     <div class="card-body p-4">
         <div class="d-flex justify-content-between align-items-start mb-4">
             <div>
-                <h1 class="h3 mb-1">Envoi multiple confirmé</h1>
+                <h1 class="h3 mb-1">Transfert confirmé</h1>
                 <p class="text-muted mb-0">Groupe <?= esc($resultat['id_envoi_multiple']) ?></p>
             </div>
             <span class="badge text-bg-success">Validé</span>
@@ -66,7 +66,7 @@
         </div>
     </div>
     <div class="card-footer d-flex gap-2">
-        <a class="btn btn-primary" href="/client/envoi-multiple">Nouvel envoi multiple</a>
+        <a class="btn btn-primary" href="/client/envoi-multiple">Nouveau transfert</a>
         <a class="btn btn-outline-secondary" href="/client/historique">Historique</a>
     </div>
 </div>
