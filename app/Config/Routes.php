@@ -12,6 +12,13 @@ $routes->get('deconnexion', 'Client::logout');
 $routes->get('client', 'Client::dashboard');
 $routes->get('client/depot', 'Client::depot');
 $routes->post('client/depot', 'Client::enregistrerDepot');
+$routes->get('client/retrait', 'Client::retrait');
+$routes->post('client/retrait', 'Client::enregistrerRetrait');
+$routes->get('client/retrait/(:num)', 'Client::detailRetrait/$1');
+$routes->get('client/transfert', 'Client::transfert');
+$routes->post('client/transfert', 'Client::enregistrerTransfert');
+$routes->get('client/transfert/(:num)', 'Client::detailTransfert/$1');
+$routes->get('client/historique', 'Client::historique');
 
 $routes->group('operateur', ['namespace' => 'App\Controllers'], static function ($routes) {
     $routes->get('/', 'Operateur::index');

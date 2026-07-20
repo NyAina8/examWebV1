@@ -8,6 +8,9 @@
     </div>
     <div class="d-flex gap-2">
         <a class="btn btn-primary" href="/client/depot">Faire un dépôt</a>
+        <a class="btn btn-outline-primary" href="/client/retrait">Faire un retrait</a>
+        <a class="btn btn-outline-primary" href="/client/transfert">Faire un transfert</a>
+        <a class="btn btn-outline-secondary" href="/client/historique">Historique</a>
         <a class="btn btn-outline-secondary" href="/deconnexion">Déconnexion</a>
     </div>
 </div>

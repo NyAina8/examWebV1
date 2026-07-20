@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\CompteMobileMoneyModel;
 use App\Models\OperationModel;
+use App\Models\BaremeFraisModel;
+use App\Models\PrefixeTelephoniqueModel;
 use App\Models\TypeOperationModel;
 use CodeIgniter\Database\BaseConnection;
 use Config\Database;
@@ -15,14 +17,18 @@ class MobileMoneyService
     private BaseConnection $db;
     private CompteMobileMoneyModel $comptes;
     private OperationModel $operations;
+    private BaremeFraisModel $baremesFrais;
+    private PrefixeTelephoniqueModel $prefixes;
     private TypeOperationModel $typesOperations;
 
     public function __construct(?BaseConnection $db = null)
     {
         $this->db = $db ?? Database::connect();
-        $this->comptes = new CompteMobileMoneyModel();
-        $this->operations = new OperationModel();
-        $this->typesOperations = new TypeOperationModel();
+        $this->comptes = new CompteMobileMoneyModel($this->db);
+        $this->operations = new OperationModel($this->db);
+        $this->baremesFrais = new BaremeFraisModel($this->db);
+        $this->prefixes = new PrefixeTelephoniqueModel($this->db);
+        $this->typesOperations = new TypeOperationModel($this->db);
     }
 
     public function recupererCompte(int|string $identifiant): ?array
@@ -172,6 +178,334 @@ class MobileMoneyService
             'ancien_solde' => $ancienSolde,
             'nouveau_solde' => $nouveauSolde,
         ];
+    }
+
+    public function retirer(int|string $identifiant, int $montant): array
+    {
+        if ($montant <= 0) {
+            throw new InvalidArgumentException('Le montant du retrait doit être supérieur à zéro.');
+        }
+
+        $compte = $this->recupererCompte($identifiant);
+
+        if ($compte === null) {
+            throw new RuntimeException('Compte Mobile Money introuvable.');
+        }
+
+        if ($compte['statut'] !== 'actif') {
+            throw new RuntimeException('Ce compte est désactivé.');
+        }
+
+        $typeRetrait = $this->typesOperations
+            ->where('code', 'retrait')
+            ->where('actif', 1)
+            ->first();
+
+        if ($typeRetrait === null) {
+            throw new RuntimeException("Le type d'opération retrait n'est pas actif.");
+        }
+
+        $bareme = $this->baremesFrais->findForAmount((int) $typeRetrait['id_type_operation'], $montant);
+
+        if ($bareme === null) {
+            throw new RuntimeException("Aucune tranche de frais active ne correspond à ce montant.");
+        }
+
+        $frais = (int) $bareme['frais'];
+
+        if ($montant > PHP_INT_MAX - $frais) {
+            throw new InvalidArgumentException('Le montant et les frais dépassent les limites du système.');
+        }
+
+        $total = $montant + $frais;
+        $ancienSolde = (int) $compte['solde'];
+
+        if ($ancienSolde < $total) {
+            throw new RuntimeException('Solde insuffisant pour couvrir le montant du retrait et les frais.');
+        }
+
+        $nouveauSolde = $ancienSolde - $total;
+        $dateOperation = date('Y-m-d H:i:s');
+
+        $this->db->transBegin();
+
+        try {
+            $soldeModifie = $this->comptes->update($compte['id_compte'], ['solde' => $nouveauSolde]);
+
+            if (! $soldeModifie) {
+                throw new RuntimeException("Le solde n'a pas pu être mis à jour.");
+            }
+
+            $this->operations->insert([
+                'reference' => $this->genererReference(),
+                'id_type_operation' => (int) $typeRetrait['id_type_operation'],
+                'id_compte_source' => (int) $compte['id_compte'],
+                'montant' => $montant,
+                'frais' => $frais,
+                'solde_source_apres' => $nouveauSolde,
+                'statut' => 'validee',
+                'description' => 'Retrait client',
+                'created_at' => $dateOperation,
+            ], true);
+
+            $operationId = (int) $this->operations->getInsertID();
+
+            if ($operationId <= 0) {
+                throw new RuntimeException("L'opération de retrait n'a pas pu être enregistrée.");
+            }
+
+            $this->db->transCommit();
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+
+            throw $exception;
+        }
+
+        return [
+            'id_operation' => $operationId,
+            'ancien_solde' => $ancienSolde,
+            'montant' => $montant,
+            'frais' => $frais,
+            'total' => $total,
+            'nouveau_solde' => $nouveauSolde,
+            'date_operation' => $dateOperation,
+        ];
+    }
+
+    public function recupererRetraitClient(int $operationId, int $compteId): ?array
+    {
+        return $this->db->table('operations')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, comptes_mobile_money.numero_telephone')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->join('comptes_mobile_money', 'comptes_mobile_money.id_compte = operations.id_compte_source')
+            ->where('operations.id_operation', $operationId)
+            ->where('operations.id_compte_source', $compteId)
+            ->where('types_operations.code', 'retrait')
+            ->get()
+            ->getRowArray();
+    }
+
+    public function transferer(int|string $expediteurId, string $numeroDestinataire, int $montant): array
+    {
+        if ($montant <= 0) {
+            throw new InvalidArgumentException('Le montant du transfert doit être supérieur à zéro.');
+        }
+
+        if (! preg_match('/^03[0-9]{8}$/', $numeroDestinataire)) {
+            throw new InvalidArgumentException('Le numéro du destinataire est invalide.');
+        }
+
+        if ($this->prefixes->findActiveForNumero($numeroDestinataire) === null) {
+            throw new RuntimeException('Le préfixe du destinataire n’est pas actif.');
+        }
+
+        $expediteur = $this->recupererCompte($expediteurId);
+
+        if ($expediteur === null) {
+            throw new RuntimeException('Compte expéditeur introuvable.');
+        }
+
+        if ($expediteur['statut'] !== 'actif') {
+            throw new RuntimeException('Votre compte est désactivé.');
+        }
+
+        $destinataire = $this->recupererCompte($numeroDestinataire);
+
+        if ($destinataire === null) {
+            throw new RuntimeException('Le compte destinataire est introuvable.');
+        }
+
+        if ($destinataire['statut'] !== 'actif') {
+            throw new RuntimeException('Le compte destinataire est désactivé.');
+        }
+
+        if ((int) $expediteur['id_compte'] === (int) $destinataire['id_compte']) {
+            throw new InvalidArgumentException('Vous ne pouvez pas transférer vers votre propre numéro.');
+        }
+
+        $typeTransfert = $this->typesOperations
+            ->where('code', 'transfert')
+            ->where('actif', 1)
+            ->first();
+
+        if ($typeTransfert === null) {
+            throw new RuntimeException("Le type d'opération transfert n'est pas actif.");
+        }
+
+        $bareme = $this->baremesFrais->findForAmount((int) $typeTransfert['id_type_operation'], $montant);
+
+        if ($bareme === null) {
+            throw new RuntimeException("Aucune tranche de frais active ne correspond à ce montant.");
+        }
+
+        $frais = (int) $bareme['frais'];
+
+        if ($montant > PHP_INT_MAX - $frais) {
+            throw new InvalidArgumentException('Le montant et les frais dépassent les limites du système.');
+        }
+
+        $totalDebit = $montant + $frais;
+        $ancienSoldeExpediteur = (int) $expediteur['solde'];
+        $ancienSoldeDestinataire = (int) $destinataire['solde'];
+
+        if ($ancienSoldeExpediteur < $totalDebit) {
+            throw new RuntimeException('Solde insuffisant pour couvrir le transfert et les frais.');
+        }
+
+        if ($montant > PHP_INT_MAX - $ancienSoldeDestinataire) {
+            throw new InvalidArgumentException('Le crédit destinataire dépasse les limites du système.');
+        }
+
+        $nouveauSoldeExpediteur = $ancienSoldeExpediteur - $totalDebit;
+        $nouveauSoldeDestinataire = $ancienSoldeDestinataire + $montant;
+        $dateOperation = date('Y-m-d H:i:s');
+
+        $this->db->transBegin();
+
+        try {
+            $debitEffectue = $this->comptes->update($expediteur['id_compte'], ['solde' => $nouveauSoldeExpediteur]);
+
+            if (! $debitEffectue) {
+                throw new RuntimeException("Le solde de l'expéditeur n'a pas pu être mis à jour.");
+            }
+
+            $creditEffectue = $this->comptes->update($destinataire['id_compte'], ['solde' => $nouveauSoldeDestinataire]);
+
+            if (! $creditEffectue) {
+                throw new RuntimeException("Le solde du destinataire n'a pas pu être mis à jour.");
+            }
+
+            $this->operations->insert([
+                'reference' => $this->genererReference(),
+                'id_type_operation' => (int) $typeTransfert['id_type_operation'],
+                'id_compte_source' => (int) $expediteur['id_compte'],
+                'id_compte_destination' => (int) $destinataire['id_compte'],
+                'montant' => $montant,
+                'frais' => $frais,
+                'solde_source_apres' => $nouveauSoldeExpediteur,
+                'solde_destination_apres' => $nouveauSoldeDestinataire,
+                'statut' => 'validee',
+                'description' => 'Transfert client',
+                'created_at' => $dateOperation,
+            ], true);
+
+            $operationId = (int) $this->operations->getInsertID();
+
+            if ($operationId <= 0) {
+                throw new RuntimeException("L'opération de transfert n'a pas pu être enregistrée.");
+            }
+
+            $this->db->transCommit();
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+
+            throw $exception;
+        }
+
+        return [
+            'id_operation' => $operationId,
+            'numero_destinataire' => $numeroDestinataire,
+            'ancien_solde_expediteur' => $ancienSoldeExpediteur,
+            'ancien_solde_destinataire' => $ancienSoldeDestinataire,
+            'montant' => $montant,
+            'frais' => $frais,
+            'total_debit' => $totalDebit,
+            'nouveau_solde_expediteur' => $nouveauSoldeExpediteur,
+            'nouveau_solde_destinataire' => $nouveauSoldeDestinataire,
+            'date_operation' => $dateOperation,
+        ];
+    }
+
+    public function recupererTransfertClient(int $operationId, int $compteId): ?array
+    {
+        return $this->db->table('operations')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source')
+            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination')
+            ->where('operations.id_operation', $operationId)
+            ->where('operations.id_compte_source', $compteId)
+            ->where('types_operations.code', 'transfert')
+            ->get()
+            ->getRowArray();
+    }
+
+    public function recupererHistoriqueClient(int $compteId, int $page = 1, int $perPage = 10): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, $perPage);
+        $offset = ($page - 1) * $perPage;
+
+        $countBuilder = $this->db->table('operations')
+            ->groupStart()
+                ->where('operations.id_compte_source', $compteId)
+                ->orWhere('operations.id_compte_destination', $compteId)
+            ->groupEnd();
+
+        $total = $countBuilder->countAllResults();
+
+        $operations = $this->db->table('operations')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
+            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
+            ->groupStart()
+                ->where('operations.id_compte_source', $compteId)
+                ->orWhere('operations.id_compte_destination', $compteId)
+            ->groupEnd()
+            ->orderBy('operations.created_at', 'DESC')
+            ->orderBy('operations.id_operation', 'DESC')
+            ->limit($perPage, $offset)
+            ->get()
+            ->getResultArray();
+
+        return [
+            'operations' => array_map(
+                static fn (array $operation): array => self::presenterOperationHistorique($operation, $compteId),
+                $operations
+            ),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => (int) ceil($total / $perPage),
+        ];
+    }
+
+    private static function presenterOperationHistorique(array $operation, int $compteId): array
+    {
+        $estSource = (int) ($operation['id_compte_source'] ?? 0) === $compteId;
+        $estDestination = (int) ($operation['id_compte_destination'] ?? 0) === $compteId;
+        $typeCode = $operation['type_code'];
+
+        if ($typeCode === 'transfert' && $estSource) {
+            $operation['libelle_historique'] = 'Transfert envoyé';
+            $operation['numero_affiche'] = $operation['numero_destination'] ?? '-';
+            $operation['solde_apres'] = $operation['solde_source_apres'];
+
+            return $operation;
+        }
+
+        if ($typeCode === 'transfert' && $estDestination) {
+            $operation['libelle_historique'] = 'Transfert reçu';
+            $operation['numero_affiche'] = $operation['numero_source'] ?? '-';
+            $operation['solde_apres'] = $operation['solde_destination_apres'];
+
+            return $operation;
+        }
+
+        if ($typeCode === 'depot') {
+            $operation['libelle_historique'] = $operation['type_operation'];
+            $operation['numero_affiche'] = $operation['numero_destination'] ?? '-';
+            $operation['solde_apres'] = $operation['solde_destination_apres'];
+
+            return $operation;
+        }
+
+        $operation['libelle_historique'] = $operation['type_operation'];
+        $operation['numero_affiche'] = $operation['numero_source'] ?? '-';
+        $operation['solde_apres'] = $operation['solde_source_apres'];
+
+        return $operation;
     }
 
     private function genererReference(): string
