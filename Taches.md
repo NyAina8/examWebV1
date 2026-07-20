@@ -125,3 +125,107 @@
   - le solde après l’opération.
 - Classer les opérations de la plus récente à la plus ancienne.
 
+# Version 2 — Tag v2
+
+## Tâches de Ny Aina 
+
+- Adapter la base de données pour gérer plusieurs opérateurs.
+- Ajouter ou compléter la table des opérateurs.
+- Associer chaque préfixe téléphonique à un opérateur.
+- Distinguer :
+  - l’opérateur principal ;
+  - les autres opérateurs.
+- Ajouter les pourcentages de commission pour les transferts vers les autres opérateurs.
+- Ajouter les données initiales :
+  - opérateur principal ;
+  - opérateurs externes ;
+  - préfixes 032, 033, 034, 037 ou autres selon le besoin.
+- Adapter `base.sql` sans créer un deuxième fichier SQL.
+- Ajouter les colonnes nécessaires dans les opérations pour identifier :
+  - l’opérateur source ;
+  - l’opérateur destinataire ;
+  - la commission interopérateur ;
+  - les frais de retrait inclus ;
+  - le groupe d’envoi multiple.
+
+## Tâches de Fitahiana 
+
+- Créer l’interface de gestion des opérateurs.
+- Permettre :
+  - l’ajout d’un opérateur ;
+  - la modification ;
+  - l’activation ou désactivation ;
+  - la consultation.
+- Associer les préfixes à chaque opérateur.
+- Configurer le pourcentage de commission appliqué aux transferts vers un autre opérateur.
+- Vérifier que le pourcentage est valide.
+- Empêcher la création de préfixes en double.
+
+## Tâches de Ny Aina 
+
+- Adapter la fonctionnalité de transfert existante.
+- Détecter automatiquement l’opérateur du destinataire grâce à son préfixe.
+- Distinguer :
+  - transfert interne ;
+  - transfert vers un autre opérateur.
+- Pour un transfert externe :
+  - calculer les frais habituels ;
+  - calculer la commission interopérateur ;
+  - enregistrer l’opérateur destinataire ;
+  - enregistrer le montant dû à cet opérateur.
+- Afficher au client :
+  - le montant envoyé ;
+  - les frais ;
+  - la commission éventuelle ;
+  - le total débité.
+
+## Tâches de Fitahiana
+
+- Adapter la page « Situation gain via les différents frais ».
+- Séparer :
+  - les gains internes de l’opérateur principal ;
+  - les commissions obtenues sur les transferts externes ;
+  - les montants à reverser aux autres opérateurs.
+- Afficher les résultats par opérateur.
+- Afficher :
+  - le nombre de transferts ;
+  - le montant total envoyé ;
+  - les frais générés ;
+  - les commissions ;
+  - le montant à reverser.
+
+## Tâches de Ny Aina 
+
+- Ajouter une option dans le formulaire de transfert :
+  - « Inclure les frais de retrait ».
+- Lorsque l’option est cochée :
+  - calculer les frais de retrait correspondant au montant ;
+  - ajouter ces frais au montant reçu par le destinataire ;
+  - débiter ce montant supplémentaire chez l’expéditeur.
+- Afficher clairement :
+  - montant du transfert ;
+  - frais de transfert ;
+  - frais de retrait inclus ;
+  - total débité ;
+  - montant reçu.
+
+## Tâches de Fitahiana 
+
+- Créer une fonctionnalité d’envoi vers plusieurs numéros.
+- Permettre de saisir plusieurs destinataires.
+- Demander un montant total.
+- Diviser automatiquement le montant entre les destinataires.
+- Vérifier que la division est possible.
+- Gérer le reste si le montant n’est pas divisible exactement.
+- Vérifier chaque numéro :
+  - format ;
+  - préfixe ;
+  - opérateur ;
+  - existence du compte si nécessaire.
+- Calculer les frais pour chaque transfert.
+- Utiliser une seule transaction globale.
+- Annuler tous les transferts si une erreur survient.
+- Enregistrer chaque transfert dans l’historique.
+
+
+
