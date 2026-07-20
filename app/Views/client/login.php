@@ -5,7 +5,7 @@
     <div class="col-md-6 col-lg-5">
         <div class="card shadow-sm">
             <div class="card-body p-4">
-                <h1 class="h3 mb-3">Connexion client</h1>
+                <h1 class="h3 mb-3">Connexion</h1>
                 <p class="text-muted">Entrez votre numéro Mobile Money pour accéder à votre compte.</p>
 
                 <form method="post" action="/connexion">

@@ -3,17 +3,22 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= esc($title ?? 'Configuration opérateur') ?></title>
+    <title><?= esc($title ?? 'Administration Mobile Money') ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
     <div class="container">
-        <a class="navbar-brand" href="/operateur">Mobile Money</a>
+        <a class="navbar-brand" href="/operateur">Admin Mobile Money</a>
         <div class="navbar-nav">
-            <a class="nav-link" href="/operateur/prefixes">Préfixes</a>
-            <a class="nav-link" href="/operateur/types">Types</a>
+            <a class="nav-link" href="/operateur">Tableau de bord</a>
             <a class="nav-link" href="/operateur/baremes">Barèmes</a>
+            <a class="nav-link" href="/operateur/comptes">Client</a>
+            <a class="nav-link" href="/operateur/depots">Dépôts</a>
+            <a class="nav-link" href="/operateur/retraits">Retraits</a>
+            <a class="nav-link" href="/operateur/transferts">Transferts</a>
+            <a class="nav-link" href="/operateur/gains">Gains</a>
+            <a class="nav-link" href="/admin/deconnexion">Déconnexion</a>
         </div>
     </div>
 </nav>

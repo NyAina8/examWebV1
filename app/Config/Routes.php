@@ -6,10 +6,13 @@ use CodeIgniter\Router\RouteCollection;
  * @var RouteCollection $routes
  */
 $routes->get('/', 'Home::index');
+$routes->get('admin', 'Operateur::login');
+$routes->get('admin/deconnexion', 'Operateur::logout');
 $routes->get('connexion', 'Client::login');
 $routes->post('connexion', 'Client::authenticate');
 $routes->get('deconnexion', 'Client::logout');
 $routes->get('client', 'Client::dashboard');
+$routes->get('client/solde', 'Client::solde');
 $routes->get('client/depot', 'Client::depot');
 $routes->post('client/depot', 'Client::enregistrerDepot');
 $routes->get('client/retrait', 'Client::retrait');
@@ -22,6 +25,11 @@ $routes->get('client/historique', 'Client::historique');
 
 $routes->group('operateur', ['namespace' => 'App\Controllers'], static function ($routes) {
     $routes->get('/', 'Operateur::index');
+    $routes->get('comptes', 'Operateur::comptes');
+    $routes->get('depots', 'Operateur::depots');
+    $routes->get('retraits', 'Operateur::retraits');
+    $routes->get('transferts', 'Operateur::transferts');
+    $routes->get('gains', 'Operateur::gains');
 
     $routes->get('prefixes', 'Operateur::prefixes');
     $routes->get('prefixes/nouveau', 'Operateur::newPrefixe');

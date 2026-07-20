@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CompteMobileMoneyModel;
+use App\Models\ClientModel;
 use App\Models\OperationModel;
 use App\Models\BaremeFraisModel;
 use App\Models\PrefixeTelephoniqueModel;
@@ -15,6 +16,7 @@ use RuntimeException;
 class MobileMoneyService
 {
     private BaseConnection $db;
+    private ClientModel $clients;
     private CompteMobileMoneyModel $comptes;
     private OperationModel $operations;
     private BaremeFraisModel $baremesFrais;
@@ -24,6 +26,7 @@ class MobileMoneyService
     public function __construct(?BaseConnection $db = null)
     {
         $this->db = $db ?? Database::connect();
+        $this->clients = new ClientModel($this->db);
         $this->comptes = new CompteMobileMoneyModel($this->db);
         $this->operations = new OperationModel($this->db);
         $this->baremesFrais = new BaremeFraisModel($this->db);
@@ -59,6 +62,64 @@ class MobileMoneyService
             ->where('comptes_mobile_money.id_compte', $compte['id_compte'])
             ->get()
             ->getRowArray();
+    }
+
+    public function connecterOuCreerCompteClient(string $numeroTelephone): array
+    {
+        if (! preg_match('/^03[0-9]{8}$/', $numeroTelephone)) {
+            throw new InvalidArgumentException('Le numéro de téléphone est invalide.');
+        }
+
+        $prefixe = $this->prefixes->findActiveForNumero($numeroTelephone);
+
+        if ($prefixe === null) {
+            throw new RuntimeException('Le préfixe de ce numéro n’est pas actif.');
+        }
+
+        $compte = $this->recupererCompteClient($numeroTelephone);
+
+        if ($compte !== null) {
+            return $compte;
+        }
+
+        $this->db->transBegin();
+
+        try {
+            $clientId = (int) $this->clients->insert([
+                'nom' => 'Client',
+                'prenom' => $numeroTelephone,
+            ], true);
+
+            if ($clientId <= 0) {
+                throw new RuntimeException("Le client n'a pas pu être créé.");
+            }
+
+            $compteId = (int) $this->comptes->insert([
+                'id_client' => $clientId,
+                'id_prefixe' => (int) $prefixe['id_prefixe'],
+                'numero_telephone' => $numeroTelephone,
+                'solde' => 0,
+                'statut' => 'actif',
+            ], true);
+
+            if ($compteId <= 0) {
+                throw new RuntimeException("Le compte Mobile Money n'a pas pu être créé.");
+            }
+
+            $this->db->transCommit();
+        } catch (\Throwable $exception) {
+            $this->db->transRollback();
+
+            throw $exception;
+        }
+
+        $compte = $this->recupererCompteClient($numeroTelephone);
+
+        if ($compte === null) {
+            throw new RuntimeException('Le compte créé est introuvable.');
+        }
+
+        return $compte;
     }
 
     public function consulterSolde(int|string $identifiant): int
@@ -206,12 +267,7 @@ class MobileMoneyService
         }
 
         $bareme = $this->baremesFrais->findForAmount((int) $typeRetrait['id_type_operation'], $montant);
-
-        if ($bareme === null) {
-            throw new RuntimeException("Aucune tranche de frais active ne correspond à ce montant.");
-        }
-
-        $frais = (int) $bareme['frais'];
+        $frais = $bareme === null ? 0 : (int) $bareme['frais'];
 
         if ($montant > PHP_INT_MAX - $frais) {
             throw new InvalidArgumentException('Le montant et les frais dépassent les limites du système.');
@@ -333,12 +389,7 @@ class MobileMoneyService
         }
 
         $bareme = $this->baremesFrais->findForAmount((int) $typeTransfert['id_type_operation'], $montant);
-
-        if ($bareme === null) {
-            throw new RuntimeException("Aucune tranche de frais active ne correspond à ce montant.");
-        }
-
-        $frais = (int) $bareme['frais'];
+        $frais = $bareme === null ? 0 : (int) $bareme['frais'];
 
         if ($montant > PHP_INT_MAX - $frais) {
             throw new InvalidArgumentException('Le montant et les frais dépassent les limites du système.');
@@ -469,6 +520,51 @@ class MobileMoneyService
             'per_page' => $perPage,
             'total_pages' => (int) ceil($total / $perPage),
         ];
+    }
+
+    public function recupererEvolutionSoldeClient(int $compteId): array
+    {
+        $operations = $this->db->table('operations')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
+            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
+            ->groupStart()
+                ->where('operations.id_compte_source', $compteId)
+                ->orWhere('operations.id_compte_destination', $compteId)
+            ->groupEnd()
+            ->orderBy('operations.created_at', 'ASC')
+            ->orderBy('operations.id_operation', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        return array_map(
+            static function (array $operation) use ($compteId): array {
+                $operation = self::presenterOperationHistorique($operation, $compteId);
+                $montant = (int) $operation['montant'];
+                $frais = (int) $operation['frais'];
+                $typeCode = $operation['type_code'];
+                $estSource = (int) ($operation['id_compte_source'] ?? 0) === $compteId;
+
+                if ($typeCode === 'depot') {
+                    $variation = $montant;
+                } elseif ($typeCode === 'retrait') {
+                    $variation = -($montant + $frais);
+                } elseif ($typeCode === 'transfert' && $estSource) {
+                    $variation = -($montant + $frais);
+                } else {
+                    $variation = $montant;
+                }
+
+                $soldeApres = (int) $operation['solde_apres'];
+                $operation['variation'] = $variation;
+                $operation['solde_avant'] = $soldeApres - $variation;
+                $operation['solde_apres'] = $soldeApres;
+
+                return $operation;
+            },
+            $operations
+        );
     }
 
     private static function presenterOperationHistorique(array $operation, int $compteId): array

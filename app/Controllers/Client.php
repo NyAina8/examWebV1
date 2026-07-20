@@ -9,6 +9,8 @@ use RuntimeException;
 
 class Client extends BaseController
 {
+    private const ADMIN_NUMERO = '0000000000';
+
     private MobileMoneyService $mobileMoney;
     private PrefixeTelephoniqueModel $prefixes;
 
@@ -32,6 +34,18 @@ class Client extends BaseController
     public function authenticate()
     {
         $numeroTelephone = $this->normaliserNumero((string) $this->request->getPost('numero_telephone'));
+
+        if ($numeroTelephone === self::ADMIN_NUMERO) {
+            session()->regenerate();
+            session()->remove(['client_connecte', 'client_id', 'compte_id', 'numero_telephone']);
+            session()->set([
+                'admin_connecte' => true,
+                'admin_numero' => self::ADMIN_NUMERO,
+            ]);
+
+            return redirect()->to('/operateur')->with('success', 'Connexion administrateur réussie.');
+        }
+
         $errors = $this->validerConnexion($numeroTelephone);
 
         if ($errors !== []) {
@@ -40,12 +54,16 @@ class Client extends BaseController
                 ->with('errors', $errors);
         }
 
-        $compte = $this->mobileMoney->recupererCompteClient($numeroTelephone);
-
-        if ($compte === null) {
+        try {
+            $compte = $this->mobileMoney->connecterOuCreerCompteClient($numeroTelephone);
+        } catch (InvalidArgumentException | RuntimeException $exception) {
             return redirect()->back()
                 ->withInput()
-                ->with('error', 'Aucun compte client ne correspond à ce numéro.');
+                ->with('error', $exception->getMessage());
+        } catch (\Throwable) {
+            return redirect()->back()
+                ->withInput()
+                ->with('error', "La connexion n'a pas pu être finalisée.");
         }
 
         if ($compte['statut'] !== 'actif') {
@@ -169,6 +187,29 @@ class Client extends BaseController
             'page' => $historique['page'],
             'totalPages' => $historique['total_pages'],
             'total' => $historique['total'],
+        ]);
+    }
+
+    public function solde()
+    {
+        $redirect = $this->exigerConnexion();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $compte = $this->mobileMoney->recupererCompteClient((int) session('compte_id'));
+
+        if ($compte === null) {
+            session()->destroy();
+
+            return redirect()->to('/connexion')->with('error', 'Votre compte est introuvable. Veuillez vous reconnecter.');
+        }
+
+        return view('client/solde', [
+            'compte' => $compte,
+            'solde' => $this->mobileMoney->consulterSolde((int) $compte['id_compte']),
+            'evolution' => $this->mobileMoney->recupererEvolutionSoldeClient((int) $compte['id_compte']),
         ]);
     }
 
