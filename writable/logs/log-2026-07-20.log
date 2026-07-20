@@ -1,0 +1,32 @@
+ERROR - 2026-07-20 09:36:39 --> Error connecting to the database: Error: Class "SQLite3" not found in /home/fitahiana/Bureau/examWebV1/system/Database/SQLite3/Connection.php:111
+Stack trace:
+#0 /home/fitahiana/Bureau/examWebV1/system/Database/BaseConnection.php(555): CodeIgniter\Database\SQLite3\Connection->connect()
+#1 /home/fitahiana/Bureau/examWebV1/system/Database/SQLite3/Connection.php(74): CodeIgniter\Database\BaseConnection->initialize()
+#2 /home/fitahiana/Bureau/examWebV1/system/Database/BaseConnection.php(795): CodeIgniter\Database\SQLite3\Connection->initialize()
+#3 /home/fitahiana/Bureau/examWebV1/system/Database/BaseBuilder.php(1733): CodeIgniter\Database\BaseConnection->query()
+#4 /home/fitahiana/Bureau/examWebV1/system/Model.php(523): CodeIgniter\Database\BaseBuilder->countAllResults()
+#5 /home/fitahiana/Bureau/examWebV1/app/Controllers/Operateur.php(26): CodeIgniter\Model->countAllResults()
+#6 /home/fitahiana/Bureau/examWebV1/system/CodeIgniter.php(951): App\Controllers\Operateur->index()
+#7 /home/fitahiana/Bureau/examWebV1/system/CodeIgniter.php(497): CodeIgniter\CodeIgniter->runController()
+#8 /home/fitahiana/Bureau/examWebV1/system/CodeIgniter.php(340): CodeIgniter\CodeIgniter->handleRequest()
+#9 /home/fitahiana/Bureau/examWebV1/system/Boot.php(417): CodeIgniter\CodeIgniter->run()
+#10 /home/fitahiana/Bureau/examWebV1/system/Boot.php(68): CodeIgniter\Boot::runCodeIgniter()
+#11 /home/fitahiana/Bureau/examWebV1/public/index.php(59): CodeIgniter\Boot::bootWeb()
+#12 /home/fitahiana/Bureau/examWebV1/system/rewrite.php(44): require_once('...')
+#13 {main}
+CRITICAL - 2026-07-20 09:36:39 --> CodeIgniter\Database\Exceptions\DatabaseException: Unable to connect to the database.
+Main connection [SQLite3]: Class "SQLite3" not found
+[Method: GET, Route: operateur]
+in SYSTEMPATH/Database/BaseConnection.php on line 606.
+ 1 SYSTEMPATH/Database/SQLite3/Connection.php(74): CodeIgniter\Database\BaseConnection->initialize()
+ 2 SYSTEMPATH/Database/BaseConnection.php(795): CodeIgniter\Database\SQLite3\Connection->initialize()
+ 3 SYSTEMPATH/Database/BaseBuilder.php(1733): CodeIgniter\Database\BaseConnection->query()
+ 4 SYSTEMPATH/Model.php(523): CodeIgniter\Database\BaseBuilder->countAllResults()
+ 5 APPPATH/Controllers/Operateur.php(26): CodeIgniter\Model->countAllResults()
+ 6 SYSTEMPATH/CodeIgniter.php(951): App\Controllers\Operateur->index()
+ 7 SYSTEMPATH/CodeIgniter.php(497): CodeIgniter\CodeIgniter->runController()
+ 8 SYSTEMPATH/CodeIgniter.php(340): CodeIgniter\CodeIgniter->handleRequest()
+ 9 SYSTEMPATH/Boot.php(417): CodeIgniter\CodeIgniter->run()
+10 SYSTEMPATH/Boot.php(68): CodeIgniter\Boot::runCodeIgniter()
+11 FCPATH/index.php(59): CodeIgniter\Boot::bootWeb()
+12 SYSTEMPATH/rewrite.php(44): require_once('/home/fitahiana/Bureau/examWebV1/public/index.php')
