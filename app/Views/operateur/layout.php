@@ -19,7 +19,6 @@
             <a class="nav-link" href="/operateur/transferts">Transferts</a>
             <a class="nav-link" href="/operateur/operateurs-externes">Opérateurs</a>
             <a class="nav-link" href="/operateur/gains">Gains</a>
-            <a class="nav-link" href="/operateur/reversements">Reversements</a>
             <a class="nav-link" href="/admin/deconnexion">Déconnexion</a>
         </div>
     </div>

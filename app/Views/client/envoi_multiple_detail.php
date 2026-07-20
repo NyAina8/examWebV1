@@ -26,14 +26,14 @@
             </div>
             <div class="col-md-3">
                 <div class="border rounded p-3 h-100">
-                    <div class="text-muted">Frais</div>
-                    <div class="h4 mb-0"><?= number_format((int) $resultat['total_frais'] + (int) $resultat['total_frais_retrait_inclus'], 0, ',', ' ') ?> Ar</div>
+                    <div class="text-muted">Frais + commissions</div>
+                    <div class="h4 mb-0"><?= number_format((int) $resultat['total_frais'] + (int) $resultat['total_frais_retrait_inclus'] + (int) $resultat['total_commissions'], 0, ',', ' ') ?> Ar</div>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="border rounded p-3 h-100">
-                    <div class="text-muted">Solde après</div>
-                    <div class="h4 mb-0"><?= number_format((int) $resultat['nouveau_solde_expediteur'], 0, ',', ' ') ?> Ar</div>
+                    <div class="text-muted">Total débité</div>
+                    <div class="h4 mb-0"><?= number_format((int) $resultat['total_debit'], 0, ',', ' ') ?> Ar</div>
                 </div>
             </div>
         </div>
@@ -47,7 +47,7 @@
                     <th class="text-end">Montant</th>
                     <th class="text-end">Frais</th>
                     <th class="text-end">Commission</th>
-                    <th class="text-end">À reverser</th>
+                    <th class="text-end">Gain opérateur</th>
                 </tr>
                 </thead>
                 <tbody>

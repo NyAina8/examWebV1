@@ -17,7 +17,9 @@
             <th>Expéditeur</th>
             <th>Destinataire</th>
             <th class="text-end">Montant</th>
+            <th class="text-end">Montant reçu</th>
             <th class="text-end">Frais</th>
+            <th class="text-end">Commission</th>
             <th class="text-end">Total débité</th>
             <th>Statut</th>
         </tr>
@@ -25,7 +27,7 @@
         <tbody>
         <?php if ($transferts === []): ?>
             <tr>
-                <td class="text-center text-muted py-4" colspan="7">Aucun transfert effectué.</td>
+                <td class="text-center text-muted py-4" colspan="9">Aucun transfert effectué.</td>
             </tr>
         <?php endif; ?>
 
@@ -41,8 +43,10 @@
                     <small class="text-muted"><?= esc(trim(($transfert['prenom_destination'] ?? '') . ' ' . ($transfert['nom_destination'] ?? '')) ?: ($transfert['nom_operateur_destination'] ?? '-')) ?></small>
                 </td>
                 <td class="text-end"><?= number_format((int) $transfert['montant'], 0, ',', ' ') ?> Ar</td>
+                <td class="text-end"><?= number_format((int) (($transfert['montant_recu'] ?? 0) > 0 ? $transfert['montant_recu'] : (int) $transfert['montant'] + (int) ($transfert['frais_retrait_inclus'] ?? 0)), 0, ',', ' ') ?> Ar</td>
                 <td class="text-end"><?= number_format((int) $transfert['frais'], 0, ',', ' ') ?> Ar</td>
-                <td class="text-end"><?= number_format((int) $transfert['montant'] + (int) $transfert['frais'] + (int) ($transfert['frais_retrait_inclus'] ?? 0), 0, ',', ' ') ?> Ar</td>
+                <td class="text-end"><?= number_format((int) ($transfert['commission_interoperateur'] ?? 0), 0, ',', ' ') ?> Ar</td>
+                <td class="text-end"><?= number_format((int) (($transfert['total_debite'] ?? 0) > 0 ? $transfert['total_debite'] : (int) $transfert['montant'] + (int) $transfert['frais'] + (int) ($transfert['frais_retrait_inclus'] ?? 0) + (int) ($transfert['commission_interoperateur'] ?? 0)), 0, ',', ' ') ?> Ar</td>
                 <td>
                     <span class="badge text-bg-<?= $transfert['statut'] === 'validee' ? 'success' : 'secondary' ?>">
                         <?= $transfert['statut'] === 'validee' ? 'Validé' : 'Annulé' ?>

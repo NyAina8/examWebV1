@@ -6,12 +6,14 @@
     <a class="btn btn-primary" href="/operateur/prefixes/nouveau">Ajouter</a>
 </div>
 
+<?php $operateurCourant = null; ?>
+
 <div class="table-responsive bg-white shadow-sm">
-    <table class="table table-striped table-hover mb-0">
+    <table class="table table-striped table-hover mb-0 align-middle">
         <thead>
         <tr>
-            <th>Préfixe</th>
             <th>Opérateur</th>
+            <th>Préfixe</th>
             <th>Statut</th>
             <th class="text-end">Actions</th>
         </tr>
@@ -19,8 +21,13 @@
         <tbody>
         <?php foreach ($prefixes as $prefixe): ?>
             <tr>
+                <td>
+                    <?php if ($operateurCourant !== ($prefixe['nom_operateur'] ?? $prefixe['operateur'])): ?>
+                        <?php $operateurCourant = $prefixe['nom_operateur'] ?? $prefixe['operateur']; ?>
+                        <span class="fw-semibold"><?= esc($operateurCourant) ?></span>
+                    <?php endif; ?>
+                </td>
                 <td><?= esc($prefixe['prefixe']) ?></td>
-                <td><?= esc($prefixe['operateur']) ?></td>
                 <td>
                     <span class="badge text-bg-<?= $prefixe['actif'] ? 'success' : 'secondary' ?>">
                         <?= $prefixe['actif'] ? 'Actif' : 'Inactif' ?>

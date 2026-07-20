@@ -149,29 +149,6 @@ class Client extends BaseController
         ]);
     }
 
-    public function transfert()
-    {
-        $redirect = $this->exigerConnexion();
-
-        if ($redirect !== null) {
-            return $redirect;
-        }
-
-        $compte = $this->mobileMoney->recupererCompteClient((int) session('compte_id'));
-
-        if ($compte === null) {
-            session()->destroy();
-
-            return redirect()->to('/connexion')->with('error', 'Votre compte est introuvable. Veuillez vous reconnecter.');
-        }
-
-        return view('client/transfert', [
-            'compte' => $compte,
-            'errors' => session('errors') ?? [],
-            'apercu' => session('apercu') ?? null,
-        ]);
-    }
-
     public function envoiMultiple()
     {
         $redirect = $this->exigerConnexion();
@@ -191,7 +168,6 @@ class Client extends BaseController
         return view('client/envoi_multiple', [
             'compte' => $compte,
             'errors' => session('errors') ?? [],
-            'apercu' => session('apercu') ?? null,
         ]);
     }
 
@@ -303,49 +279,6 @@ class Client extends BaseController
             ->with('success', 'Retrait effectué avec succès.');
     }
 
-    public function enregistrerTransfert()
-    {
-        $redirect = $this->exigerConnexion();
-
-        if ($redirect !== null) {
-            return $redirect;
-        }
-
-        $numeroDestinataire = $this->normaliserNumero((string) $this->request->getPost('numero_destinataire'));
-        $montant = $this->normaliserMontant((string) $this->request->getPost('montant'));
-        $inclureFraisRetrait = $this->request->getPost('inclure_frais_retrait') === '1';
-        $errors = $this->validerTransfert($numeroDestinataire, $montant);
-
-        if ($errors !== []) {
-            return redirect()->back()
-                ->withInput()
-                ->with('errors', $errors);
-        }
-
-        try {
-            $apercu = $this->mobileMoney->calculerTransfert((int) session('compte_id'), $numeroDestinataire, (int) $montant, $inclureFraisRetrait);
-
-            if ($this->request->getPost('confirmer') !== '1') {
-                return redirect()->back()
-                    ->withInput()
-                    ->with('apercu', $apercu);
-            }
-
-            $resultat = $this->mobileMoney->transferer((int) session('compte_id'), $numeroDestinataire, (int) $montant, $inclureFraisRetrait);
-        } catch (InvalidArgumentException | RuntimeException $exception) {
-            return redirect()->back()
-                ->withInput()
-                ->with('error', $exception->getMessage());
-        } catch (\Throwable) {
-            return redirect()->back()
-                ->withInput()
-                ->with('error', "Le transfert n'a pas pu être enregistré.");
-        }
-
-        return redirect()->to('/client/transfert/' . $resultat['id_operation'])
-            ->with('success', 'Transfert effectué avec succès.');
-    }
-
     public function enregistrerEnvoiMultiple()
     {
         $redirect = $this->exigerConnexion();
@@ -366,14 +299,6 @@ class Client extends BaseController
         }
 
         try {
-            $apercu = $this->mobileMoney->calculerEnvoiMultiple((int) session('compte_id'), $destinataires, (int) $montantTotal, $inclureFraisRetrait);
-
-            if ($this->request->getPost('confirmer') !== '1') {
-                return redirect()->back()
-                    ->withInput()
-                    ->with('apercu', $apercu);
-            }
-
             $resultat = $this->mobileMoney->envoyerMultiple((int) session('compte_id'), $destinataires, (int) $montantTotal, $inclureFraisRetrait);
         } catch (InvalidArgumentException | RuntimeException $exception) {
             return redirect()->back()
@@ -405,25 +330,6 @@ class Client extends BaseController
         }
 
         return view('client/retrait_detail', [
-            'operation' => $operation,
-        ]);
-    }
-
-    public function detailTransfert(int $id)
-    {
-        $redirect = $this->exigerConnexion();
-
-        if ($redirect !== null) {
-            return $redirect;
-        }
-
-        $operation = $this->mobileMoney->recupererTransfertClient($id, (int) session('compte_id'));
-
-        if ($operation === null) {
-            throw \CodeIgniter\Exceptions\PageNotFoundException::forPageNotFound('Transfert introuvable.');
-        }
-
-        return view('client/transfert_detail', [
             'operation' => $operation,
         ]);
     }
@@ -587,10 +493,6 @@ class Client extends BaseController
 
                 return $errors;
             }
-        }
-
-        if ($montantTotal !== '' && ctype_digit($montantTotal) && $destinataires !== [] && (int) $montantTotal % count(array_unique($destinataires)) !== 0) {
-            $errors['montant_total'] = "Le montant total doit être divisible exactement par le nombre de destinataires.";
         }
 
         return $errors;

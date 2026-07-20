@@ -16,15 +16,21 @@
             <th>Date</th>
             <th>Type</th>
             <th>Numéro</th>
+            <th>Opérateur</th>
             <th class="text-end">Montant</th>
             <th class="text-end">Frais</th>
+            <th class="text-end">Commission</th>
+            <th class="text-end">Retrait inclus</th>
+            <th class="text-end">Montant reçu</th>
+            <th class="text-end">Total débité</th>
+            <th>Groupe</th>
             <th class="text-end">Solde après</th>
         </tr>
         </thead>
         <tbody>
         <?php if ($operations === []): ?>
             <tr>
-                <td class="text-center text-muted py-4" colspan="6">Aucune opération pour le moment.</td>
+                <td class="text-center text-muted py-4" colspan="12">Aucune opération pour le moment.</td>
             </tr>
         <?php endif; ?>
 
@@ -41,10 +47,19 @@
                     };
                     ?>
                     <span class="badge text-bg-<?= esc($badge) ?>"><?= esc($operation['libelle_historique']) ?></span>
+                    <?php if ($operation['type_code'] === 'transfert'): ?>
+                        <div class="small text-muted"><?= esc($operation['type_transfert']) ?></div>
+                    <?php endif; ?>
                 </td>
                 <td><?= esc($operation['numero_affiche']) ?></td>
+                <td><?= esc($operation['operateur_destination'] ?? '-') ?></td>
                 <td class="text-end"><?= number_format((int) $operation['montant'], 0, ',', ' ') ?> Ar</td>
                 <td class="text-end"><?= number_format((int) $operation['frais'], 0, ',', ' ') ?> Ar</td>
+                <td class="text-end"><?= number_format((int) ($operation['commission_interoperateur'] ?? 0), 0, ',', ' ') ?> Ar</td>
+                <td class="text-end"><?= number_format((int) ($operation['frais_retrait_inclus'] ?? 0), 0, ',', ' ') ?> Ar</td>
+                <td class="text-end"><?= $operation['type_code'] === 'transfert' ? number_format((int) $operation['montant_recu_effectif'], 0, ',', ' ') . ' Ar' : '-' ?></td>
+                <td class="text-end"><?= $operation['type_code'] === 'transfert' ? number_format((int) $operation['total_debite_effectif'], 0, ',', ' ') . ' Ar' : '-' ?></td>
+                <td><?= esc($operation['id_envoi_multiple'] ?? '-') ?></td>
                 <td class="text-end fw-semibold"><?= number_format((int) $operation['solde_apres'], 0, ',', ' ') ?> Ar</td>
             </tr>
         <?php endforeach; ?>

@@ -13,7 +13,7 @@ CREATE TABLE operateurs (
     code TEXT NOT NULL UNIQUE,
     nom TEXT NOT NULL UNIQUE,
     principal INTEGER NOT NULL DEFAULT 0 CHECK (principal IN (0, 1)),
-    commission_transfert_externe REAL NOT NULL DEFAULT 0 CHECK (commission_transfert_externe >= 0),
+    commission_transfert_externe REAL NOT NULL DEFAULT 0 CHECK (commission_transfert_externe >= 0 AND commission_transfert_externe <= 100),
     actif INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT,
@@ -101,9 +101,12 @@ CREATE TABLE operations (
     numero_destinataire TEXT,
     montant INTEGER NOT NULL CHECK (montant > 0),
     frais INTEGER NOT NULL DEFAULT 0 CHECK (frais >= 0),
+    pourcentage_commission REAL NOT NULL DEFAULT 0 CHECK (pourcentage_commission >= 0 AND pourcentage_commission <= 100),
     frais_retrait_inclus INTEGER NOT NULL DEFAULT 0 CHECK (frais_retrait_inclus >= 0),
     commission_interoperateur INTEGER NOT NULL DEFAULT 0 CHECK (commission_interoperateur >= 0),
     montant_reverser INTEGER NOT NULL DEFAULT 0 CHECK (montant_reverser >= 0),
+    total_debite INTEGER NOT NULL DEFAULT 0 CHECK (total_debite >= 0),
+    montant_recu INTEGER NOT NULL DEFAULT 0 CHECK (montant_recu >= 0),
     id_envoi_multiple TEXT,
     solde_source_apres INTEGER CHECK (solde_source_apres IS NULL OR solde_source_apres >= 0),
     solde_destination_apres INTEGER CHECK (solde_destination_apres IS NULL OR solde_destination_apres >= 0),
@@ -138,17 +141,17 @@ CREATE INDEX idx_operations_type ON operations(id_type_operation);
 CREATE INDEX idx_operations_operateurs ON operations(id_operateur_source, id_operateur_destination);
 
 INSERT INTO operateurs (id_operateur, code, nom, principal, commission_transfert_externe, actif) VALUES
-    (1, 'MVOLA', 'MVola', 1, 0, 1),
-    (2, 'OM', 'Orange Money', 0, 2.5, 1),
+    (1, 'YAS', 'Yas', 1, 0, 1),
+    (2, 'OM', 'Orange Money', 0, 10, 1),
     (3, 'AIRTEL', 'Airtel Money', 0, 2, 1),
     (4, 'TELMA', 'Telma Money', 0, 1.5, 1);
 
 INSERT INTO prefixes_telephoniques (id_prefixe, id_operateur, prefixe, operateur) VALUES
     (1, 2, '032', 'Orange Money'),
     (2, 3, '033', 'Airtel Money'),
-    (3, 1, '034', 'MVola'),
+    (3, 1, '034', 'Yas'),
     (4, 4, '037', 'Telma Money'),
-    (5, 1, '038', 'MVola');
+    (5, 1, '038', 'Yas');
 
 INSERT INTO types_operations (id_type_operation, code, libelle) VALUES
     (1, 'depot', 'Dépôt'),
@@ -181,7 +184,7 @@ INSERT INTO baremes_frais (id_type_operation, montant_min, montant_max, frais) V
     (3, 1001, 5000, 50),
     (3, 5001, 10000, 100),
     (3, 10001, 25000, 200),
-    (3, 25001, 50000, 400),
+    (3, 25001, 50000, 1000),
     (3, 50001, 100000, 800),
     (3, 100001, 250000, 1500),
     (3, 250001, 500000, 1500),

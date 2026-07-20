@@ -63,7 +63,12 @@ class Operateur extends BaseController
         }
 
         return view('operateur/prefixes/index', [
-            'prefixes' => $this->prefixes->orderBy('prefixe', 'ASC')->findAll(),
+            'prefixes' => $this->prefixes
+                ->select('prefixes_telephoniques.*, operateurs.nom AS nom_operateur')
+                ->join('operateurs', 'operateurs.id_operateur = prefixes_telephoniques.id_operateur')
+                ->orderBy('operateurs.nom', 'ASC')
+                ->orderBy('prefixes_telephoniques.prefixe', 'ASC')
+                ->findAll(),
         ]);
     }
 
@@ -77,6 +82,7 @@ class Operateur extends BaseController
 
         return view('operateur/prefixes/form', [
             'prefixe' => null,
+            'operateurs' => $this->operateurs->orderBy('nom', 'ASC')->findAll(),
             'errors' => session('errors') ?? [],
         ]);
     }
@@ -120,6 +126,7 @@ class Operateur extends BaseController
 
         return view('operateur/prefixes/form', [
             'prefixe' => $prefixe,
+            'operateurs' => $this->operateurs->orderBy('nom', 'ASC')->findAll(),
             'errors' => session('errors') ?? [],
         ]);
     }
@@ -421,28 +428,26 @@ class Operateur extends BaseController
         }
 
         $situation = $this->calculerSituationGains();
+        $operateurs = $situation['operateurs'];
+        $operateurId = (int) ($this->request->getGet('operateur_id') ?? 0);
+        $operateurSelectionne = null;
+
+        if ($operateurId > 0) {
+            foreach ($operateurs as $operateur) {
+                if ((int) $operateur['id_operateur'] === $operateurId) {
+                    $operateurSelectionne = $operateur;
+
+                    break;
+                }
+            }
+        }
 
         return view('operateur/gains/index', [
             ...$situation,
-        ]);
-    }
-
-    public function reversements()
-    {
-        $redirect = $this->exigerAdmin();
-
-        if ($redirect !== null) {
-            return $redirect;
-        }
-
-        $dateDebut = trim((string) $this->request->getGet('date_debut'));
-        $dateFin = trim((string) $this->request->getGet('date_fin'));
-
-        return view('operateur/reversements/index', [
-            'dateDebut' => $dateDebut,
-            'dateFin' => $dateFin,
-            'periode' => $this->libellePeriode($dateDebut, $dateFin),
-            'operateurs' => $this->situationParOperateurExterne($dateDebut, $dateFin),
+            'operateursListe' => $operateurs,
+            'operateurs' => $operateurSelectionne === null ? $operateurs : [$operateurSelectionne],
+            'operateurSelectionne' => $operateurSelectionne,
+            'operateurSelectionneId' => $operateurSelectionne === null ? 0 : $operateurId,
         ]);
     }
 
@@ -597,12 +602,13 @@ class Operateur extends BaseController
 
     private function prefixeData(): array
     {
-        $operateur = trim((string) $this->request->getPost('operateur'));
+        $operateurId = (int) $this->request->getPost('id_operateur');
+        $operateur = $this->operateurs->find($operateurId);
 
         return [
-            'id_operateur' => $this->resolveOperateurId($operateur),
+            'id_operateur' => $operateurId,
             'prefixe' => trim((string) $this->request->getPost('prefixe')),
-            'operateur' => $operateur,
+            'operateur' => $operateur['nom'] ?? '',
             'actif' => (int) ($this->request->getPost('actif') === '1'),
         ];
     }
@@ -709,9 +715,9 @@ class Operateur extends BaseController
                 'label' => 'Préfixe',
                 'rules' => "required|regex_match[/^03[0-9]$/]|{$uniqueRule}",
             ],
-            'operateur' => [
+            'id_operateur' => [
                 'label' => 'Opérateur',
-                'rules' => 'required|min_length[2]',
+                'rules' => 'required|is_natural_no_zero|is_not_unique[operateurs.id_operateur]',
             ],
         ]);
     }
@@ -797,16 +803,21 @@ class Operateur extends BaseController
         $fraisTransfert = $this->totalFraisParType('transfert');
         $fraisTransfertInterne = $this->totalFraisTransfertInterne();
         $commissionsExternes = $this->totalColonneTransfertExterne('commission_interoperateur');
-        $montantsReverser = $this->totalColonneTransfertExterne('montant_reverser');
+        $nombreTransfertsInternes = $this->nombreTransfertsParPortee(false);
+        $nombreTransfertsExternes = $this->nombreTransfertsParPortee(true);
+        $montantsTransferes = $this->totalMontantsTransferts();
 
         return [
             'gainsInternes' => $fraisRetrait + $fraisTransfertInterne,
             'gainRetrait' => $fraisRetrait,
             'gainTransfert' => $fraisTransfert,
+            'fraisTransfertInterne' => $fraisTransfertInterne,
+            'nombreTransfertsInternes' => $nombreTransfertsInternes,
+            'nombreTransfertsExternes' => $nombreTransfertsExternes,
+            'montantsTransferes' => $montantsTransferes,
             'commissionsExternes' => $commissionsExternes,
-            'montantsReverser' => $montantsReverser,
             'gainTotal' => $fraisRetrait + $fraisTransfert + $commissionsExternes,
-            'operateurs' => $this->situationParOperateurExterne('', ''),
+            'operateurs' => $this->gainsParOperateur(),
         ];
     }
 
@@ -817,7 +828,36 @@ class Operateur extends BaseController
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->where('types_operations.code', 'transfert')
             ->where('operations.statut', 'validee')
-            ->where('operations.montant_reverser', 0)
+            ->where('operations.id_operateur_source = operations.id_operateur_destination', null, false)
+            ->get()
+            ->getRowArray();
+
+        return (int) ($result['total'] ?? 0);
+    }
+
+    private function nombreTransfertsParPortee(bool $externe): int
+    {
+        $builder = db_connect()->table('operations')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->where('types_operations.code', 'transfert')
+            ->where('operations.statut', 'validee');
+
+        if ($externe) {
+            $builder->where('operations.id_operateur_source != operations.id_operateur_destination', null, false);
+        } else {
+            $builder->where('operations.id_operateur_source = operations.id_operateur_destination', null, false);
+        }
+
+        return $builder->countAllResults();
+    }
+
+    private function totalMontantsTransferts(): int
+    {
+        $result = db_connect()->table('operations')
+            ->selectSum('operations.montant', 'total')
+            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
+            ->where('types_operations.code', 'transfert')
+            ->where('operations.statut', 'validee')
             ->get()
             ->getRowArray();
 
@@ -831,50 +871,37 @@ class Operateur extends BaseController
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->where('types_operations.code', 'transfert')
             ->where('operations.statut', 'validee')
-            ->where('operations.montant_reverser >', 0)
+            ->where('operations.id_operateur_source != operations.id_operateur_destination', null, false)
             ->get()
             ->getRowArray();
 
         return (int) ($result['total'] ?? 0);
     }
 
-    private function situationParOperateurExterne(string $dateDebut, string $dateFin): array
+    private function gainsParOperateur(): array
     {
-        $db = db_connect();
-        $builder = $db->table('operations')
-            ->select('operateurs.nom, COUNT(operations.id_operation) AS nombre_transferts, COALESCE(SUM(operations.montant), 0) AS montant_total, COALESCE(SUM(operations.frais), 0) AS frais_generes, COALESCE(SUM(operations.commission_interoperateur), 0) AS commission_conservee, COALESCE(SUM(operations.montant_reverser), 0) AS montant_reverser')
-            ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
-            ->join('operateurs', 'operateurs.id_operateur = operations.id_operateur_destination')
-            ->where('types_operations.code', 'transfert')
-            ->where('operations.statut', 'validee')
-            ->where('operations.montant_reverser >', 0);
-
-        if ($dateDebut !== '') {
-            $builder->where('date(operations.created_at) >= ' . $db->escape($dateDebut), null, false);
-        }
-
-        if ($dateFin !== '') {
-            $builder->where('date(operations.created_at) <= ' . $db->escape($dateFin), null, false);
-        }
-
-        return $builder
-            ->groupBy('operateurs.id_operateur')
+        $operateurs = db_connect()->table('operateurs')
+            ->select('operateurs.id_operateur, operateurs.nom, operateurs.commission_transfert_externe, (SELECT GROUP_CONCAT(prefixe, ", ") FROM prefixes_telephoniques WHERE prefixes_telephoniques.id_operateur = operateurs.id_operateur) AS prefixes')
+            ->select('(SELECT COUNT(*) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation WHERE types_operations.code = "transfert" AND operations.statut = "validee" AND operations.id_operateur_source = operateurs.id_operateur) AS transferts_envoyes', false)
+            ->select('(SELECT COUNT(*) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation WHERE types_operations.code = "transfert" AND operations.statut = "validee" AND operations.id_operateur_destination = operateurs.id_operateur AND operations.id_operateur_source != operations.id_operateur_destination) AS transferts_recus_externes', false)
+            ->select('(SELECT COALESCE(SUM(operations.montant), 0) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation WHERE types_operations.code = "transfert" AND operations.statut = "validee" AND operations.id_operateur_source = operateurs.id_operateur) AS montant_envoye', false)
+            ->select('(SELECT COALESCE(SUM(CASE WHEN operations.montant_recu > 0 THEN operations.montant_recu ELSE operations.montant END), 0) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation WHERE types_operations.code = "transfert" AND operations.statut = "validee" AND operations.id_operateur_destination = operateurs.id_operateur AND operations.id_operateur_source != operations.id_operateur_destination) AS montant_recu_externe', false)
+            ->select('(SELECT COALESCE(SUM(operations.frais), 0) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation WHERE types_operations.code = "transfert" AND operations.statut = "validee" AND operations.id_operateur_source = operateurs.id_operateur) AS frais_transfert_gagnes', false)
+            ->select('(SELECT COALESCE(SUM(operations.frais), 0) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation JOIN comptes_mobile_money ON comptes_mobile_money.id_compte = operations.id_compte_source JOIN prefixes_telephoniques ON prefixes_telephoniques.id_prefixe = comptes_mobile_money.id_prefixe WHERE types_operations.code = "retrait" AND operations.statut = "validee" AND prefixes_telephoniques.id_operateur = operateurs.id_operateur) AS frais_retrait_gagnes', false)
+            ->select('(SELECT COALESCE(SUM(operations.commission_interoperateur), 0) FROM operations JOIN types_operations ON types_operations.id_type_operation = operations.id_type_operation WHERE types_operations.code = "transfert" AND operations.statut = "validee" AND operations.id_operateur_destination = operateurs.id_operateur AND operations.id_operateur_source != operations.id_operateur_destination) AS commissions_gagnees', false)
+            ->where('operateurs.actif', 1)
+            ->orderBy('operateurs.principal', 'DESC')
             ->orderBy('operateurs.nom', 'ASC')
             ->get()
             ->getResultArray();
-    }
 
-    private function libellePeriode(string $dateDebut, string $dateFin): string
-    {
-        if ($dateDebut === '' && $dateFin === '') {
-            return 'Toutes les périodes';
-        }
+        return array_map(static function (array $operateur): array {
+            $operateur['gain_total'] = (int) $operateur['frais_transfert_gagnes']
+                + (int) $operateur['frais_retrait_gagnes']
+                + (int) $operateur['commissions_gagnees'];
 
-        if ($dateDebut !== '' && $dateFin !== '') {
-            return $dateDebut . ' au ' . $dateFin;
-        }
-
-        return $dateDebut !== '' ? 'Depuis ' . $dateDebut : 'Jusqu’au ' . $dateFin;
+            return $operateur;
+        }, $operateurs);
     }
 
     private function nombreOperationsParType(string $code): int

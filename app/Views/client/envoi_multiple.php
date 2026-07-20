@@ -57,47 +57,8 @@
                         <label class="form-check-label" for="inclure_frais_retrait">Inclure les frais de retrait</label>
                     </div>
 
-                    <?php if ($apercu !== null): ?>
-                        <div class="alert alert-info">
-                            <h2 class="h5">Récapitulatif avant confirmation</h2>
-                            <div class="table-responsive">
-                                <table class="table table-sm align-middle mb-3">
-                                    <thead>
-                                    <tr>
-                                        <th>Numéro</th>
-                                        <th>Opérateur</th>
-                                        <th class="text-end">Montant</th>
-                                        <th class="text-end">Frais</th>
-                                        <th class="text-end">Total débité</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody>
-                                    <?php foreach ($apercu['transferts'] as $transfert): ?>
-                                        <tr>
-                                            <td><?= esc($transfert['numero_destinataire']) ?></td>
-                                            <td><?= esc($transfert['operateur_destination']['nom']) ?></td>
-                                            <td class="text-end"><?= number_format((int) $transfert['montant'], 0, ',', ' ') ?> Ar</td>
-                                            <td class="text-end"><?= number_format((int) $transfert['frais'] + (int) $transfert['frais_retrait_inclus'], 0, ',', ' ') ?> Ar</td>
-                                            <td class="text-end"><?= number_format((int) $transfert['total_debit'], 0, ',', ' ') ?> Ar</td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                            <dl class="row mb-0">
-                                <dt class="col-sm-6">Montant par destinataire</dt>
-                                <dd class="col-sm-6"><?= number_format((int) $apercu['montant_par_destinataire'], 0, ',', ' ') ?> Ar</dd>
-                                <dt class="col-sm-6">Total frais</dt>
-                                <dd class="col-sm-6"><?= number_format((int) $apercu['total_frais'] + (int) $apercu['total_frais_retrait_inclus'], 0, ',', ' ') ?> Ar</dd>
-                                <dt class="col-sm-6">Total débité</dt>
-                                <dd class="col-sm-6 fw-semibold"><?= number_format((int) $apercu['total_debit'], 0, ',', ' ') ?> Ar</dd>
-                            </dl>
-                        </div>
-                        <input type="hidden" name="confirmer" value="1">
-                    <?php endif; ?>
-
                     <div class="d-flex gap-2">
-                        <button class="btn btn-primary" type="submit"><?= $apercu === null ? 'Voir le récapitulatif' : 'Confirmer l’envoi multiple' ?></button>
+                        <button class="btn btn-primary" type="submit">Transférer</button>
                         <a class="btn btn-outline-secondary" href="/client">Annuler</a>
                     </div>
                 </form>

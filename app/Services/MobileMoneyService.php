@@ -412,14 +412,19 @@ class MobileMoneyService
         $baremeRetrait = $typeRetrait === null ? null : $this->baremesFrais->findForAmount((int) $typeRetrait['id_type_operation'], $montant);
         $fraisRetraitInclus = $inclureFraisRetrait && $baremeRetrait !== null ? (int) $baremeRetrait['frais'] : 0;
         $montantRecu = $montant + $fraisRetraitInclus;
-        $commission = $transfertExterne ? (int) round($montant * ((float) $operateurDestination['commission_transfert_externe'] / 100)) : 0;
-        $montantReverser = $transfertExterne ? $montantRecu + $commission : 0;
+        $pourcentageCommission = $transfertExterne ? (float) $operateurDestination['commission_transfert_externe'] : 0.0;
+        $commission = $transfertExterne ? (int) round($montant * ($pourcentageCommission / 100)) : 0;
+        $montantReverser = $commission;
 
-        if ($montant > PHP_INT_MAX - $fraisTransfert || $montant + $fraisTransfert > PHP_INT_MAX - $fraisRetraitInclus) {
+        if (
+            $montant > PHP_INT_MAX - $fraisTransfert
+            || $montant + $fraisTransfert > PHP_INT_MAX - $fraisRetraitInclus
+            || $montant + $fraisTransfert + $fraisRetraitInclus > PHP_INT_MAX - $commission
+        ) {
             throw new InvalidArgumentException('Le montant et les frais dépassent les limites du système.');
         }
 
-        $totalDebit = $montant + $fraisTransfert + $fraisRetraitInclus;
+        $totalDebit = $montant + $fraisTransfert + $fraisRetraitInclus + $commission;
         $ancienSoldeExpediteur = (int) $expediteur['solde'];
         $ancienSoldeDestinataire = $destinataire === null ? null : (int) $destinataire['solde'];
 
@@ -442,6 +447,7 @@ class MobileMoneyService
             'montant' => $montant,
             'montant_recu' => $montantRecu,
             'frais' => $fraisTransfert,
+            'pourcentage_commission' => $pourcentageCommission,
             'frais_retrait_inclus' => $fraisRetraitInclus,
             'commission_interoperateur' => $commission,
             'montant_reverser' => $montantReverser,
@@ -490,9 +496,12 @@ class MobileMoneyService
                 'numero_destinataire' => $numeroDestinataire,
                 'montant' => $montant,
                 'frais' => $calcul['frais'],
+                'pourcentage_commission' => $calcul['pourcentage_commission'],
                 'frais_retrait_inclus' => $calcul['frais_retrait_inclus'],
                 'commission_interoperateur' => $calcul['commission_interoperateur'],
                 'montant_reverser' => $calcul['montant_reverser'],
+                'total_debite' => $calcul['total_debit'],
+                'montant_recu' => $calcul['montant_recu'],
                 'solde_source_apres' => $nouveauSoldeExpediteur,
                 'solde_destination_apres' => $nouveauSoldeDestinataire,
                 'statut' => 'validee',
@@ -522,12 +531,12 @@ class MobileMoneyService
 
     public function calculerEnvoiMultiple(int|string $expediteurId, array $numerosDestinataires, int $montantTotal, bool $inclureFraisRetrait = false): array
     {
-        $numerosDestinataires = array_values(array_unique(array_filter(array_map(
+        $numerosNettoyes = array_values(array_filter(array_map(
             static fn (string $numero): string => preg_replace('/\D+/', '', $numero) ?? '',
             $numerosDestinataires
-        ))));
+        )));
 
-        if ($numerosDestinataires === []) {
+        if ($numerosNettoyes === []) {
             throw new InvalidArgumentException('Veuillez saisir au moins un destinataire.');
         }
 
@@ -535,13 +544,14 @@ class MobileMoneyService
             throw new InvalidArgumentException('Le montant total doit être supérieur à zéro.');
         }
 
-        $nombreDestinataires = count($numerosDestinataires);
-
-        if ($montantTotal % $nombreDestinataires !== 0) {
-            throw new InvalidArgumentException("Le montant total n'est pas divisible exactement par le nombre de destinataires.");
+        if (count($numerosNettoyes) !== count(array_unique($numerosNettoyes))) {
+            throw new InvalidArgumentException('Un numéro destinataire est présent plusieurs fois.');
         }
 
-        $montantParDestinataire = intdiv($montantTotal, $nombreDestinataires);
+        $nombreDestinataires = count($numerosNettoyes);
+        $montantBase = intdiv($montantTotal, $nombreDestinataires);
+        $reste = $montantTotal % $nombreDestinataires;
+
         $transferts = [];
         $totalFrais = 0;
         $totalFraisRetraitInclus = 0;
@@ -549,8 +559,9 @@ class MobileMoneyService
         $totalCommissions = 0;
         $totalReverser = 0;
 
-        foreach ($numerosDestinataires as $numeroDestinataire) {
-            $calcul = $this->calculerTransfert($expediteurId, $numeroDestinataire, $montantParDestinataire, $inclureFraisRetrait);
+        foreach ($numerosNettoyes as $index => $numeroDestinataire) {
+            $montantDestinataire = $montantBase + ($index === 0 ? $reste : 0);
+            $calcul = $this->calculerTransfert($expediteurId, $numeroDestinataire, $montantDestinataire, $inclureFraisRetrait);
             $transferts[] = $calcul;
             $totalFrais += (int) $calcul['frais'];
             $totalFraisRetraitInclus += (int) $calcul['frais_retrait_inclus'];
@@ -570,7 +581,8 @@ class MobileMoneyService
             'expediteur' => $expediteur,
             'nombre_destinataires' => $nombreDestinataires,
             'montant_total' => $montantTotal,
-            'montant_par_destinataire' => $montantParDestinataire,
+            'montant_par_destinataire' => $montantBase,
+            'reste_distribue' => $reste,
             'total_frais' => $totalFrais,
             'total_frais_retrait_inclus' => $totalFraisRetraitInclus,
             'total_debit' => $totalDebit,
@@ -616,9 +628,12 @@ class MobileMoneyService
                     'numero_destinataire' => $transfert['numero_destinataire'],
                     'montant' => (int) $transfert['montant'],
                     'frais' => (int) $transfert['frais'],
+                    'pourcentage_commission' => (float) $transfert['pourcentage_commission'],
                     'frais_retrait_inclus' => (int) $transfert['frais_retrait_inclus'],
                     'commission_interoperateur' => (int) $transfert['commission_interoperateur'],
                     'montant_reverser' => (int) $transfert['montant_reverser'],
+                    'total_debite' => (int) $transfert['total_debit'],
+                    'montant_recu' => (int) $transfert['montant_recu'],
                     'id_envoi_multiple' => $idEnvoiMultiple,
                     'solde_source_apres' => $soldeExpediteurCourant,
                     'solde_destination_apres' => $nouveauSoldeDestinataire,
@@ -686,10 +701,11 @@ class MobileMoneyService
         $total = $countBuilder->countAllResults();
 
         $operations = $this->db->table('operations')
-            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination, operateur_destination.nom AS operateur_destination')
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
             ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
+            ->join('operateurs AS operateur_destination', 'operateur_destination.id_operateur = operations.id_operateur_destination', 'left')
             ->groupStart()
                 ->where('operations.id_compte_source', $compteId)
                 ->orWhere('operations.id_compte_destination', $compteId)
@@ -715,10 +731,11 @@ class MobileMoneyService
     public function recupererEvolutionSoldeClient(int $compteId): array
     {
         $operations = $this->db->table('operations')
-            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination')
+            ->select('operations.*, types_operations.libelle AS type_operation, types_operations.code AS type_code, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination, operateur_destination.nom AS operateur_destination')
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source', 'left')
             ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
+            ->join('operateurs AS operateur_destination', 'operateur_destination.id_operateur = operations.id_operateur_destination', 'left')
             ->groupStart()
                 ->where('operations.id_compte_source', $compteId)
                 ->orWhere('operations.id_compte_destination', $compteId)
@@ -741,7 +758,9 @@ class MobileMoneyService
                 } elseif ($typeCode === 'retrait') {
                     $variation = -($montant + $frais);
                 } elseif ($typeCode === 'transfert' && $estSource) {
-                    $variation = -($montant + $frais);
+                    $variation = -($montant + $frais + (int) ($operation['frais_retrait_inclus'] ?? 0) + (int) ($operation['commission_interoperateur'] ?? 0));
+                } elseif ($typeCode === 'transfert') {
+                    $variation = (int) ($operation['montant_recu_effectif'] ?? $montant);
                 } else {
                     $variation = $montant;
                 }
@@ -762,9 +781,20 @@ class MobileMoneyService
         $estSource = (int) ($operation['id_compte_source'] ?? 0) === $compteId;
         $estDestination = (int) ($operation['id_compte_destination'] ?? 0) === $compteId;
         $typeCode = $operation['type_code'];
+        $montant = (int) ($operation['montant'] ?? 0);
+        $frais = (int) ($operation['frais'] ?? 0);
+        $fraisRetraitInclus = (int) ($operation['frais_retrait_inclus'] ?? 0);
+        $commission = (int) ($operation['commission_interoperateur'] ?? 0);
+        $operation['montant_recu_effectif'] = (int) (($operation['montant_recu'] ?? 0) > 0 ? $operation['montant_recu'] : $montant + $fraisRetraitInclus);
+        $operation['total_debite_effectif'] = (int) (($operation['total_debite'] ?? 0) > 0 ? $operation['total_debite'] : $montant + $frais + $fraisRetraitInclus + $commission);
+        $operation['type_transfert'] = (
+            ! empty($operation['id_operateur_source'])
+            && ! empty($operation['id_operateur_destination'])
+            && (int) $operation['id_operateur_source'] !== (int) $operation['id_operateur_destination']
+        ) ? 'Externe' : 'Interne';
 
         if ($typeCode === 'transfert' && $estSource) {
-            $operation['libelle_historique'] = 'Transfert envoyé';
+            $operation['libelle_historique'] = ($operation['id_envoi_multiple'] ?? null) ? 'Envoi multiple envoyé' : 'Transfert envoyé';
             $operation['numero_affiche'] = $operation['numero_destination'] ?? '-';
             $operation['solde_apres'] = $operation['solde_source_apres'];
 
@@ -772,7 +802,7 @@ class MobileMoneyService
         }
 
         if ($typeCode === 'transfert' && $estDestination) {
-            $operation['libelle_historique'] = 'Transfert reçu';
+            $operation['libelle_historique'] = ($operation['id_envoi_multiple'] ?? null) ? 'Envoi multiple reçu' : 'Transfert reçu';
             $operation['numero_affiche'] = $operation['numero_source'] ?? '-';
             $operation['solde_apres'] = $operation['solde_destination_apres'];
 

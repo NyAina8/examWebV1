@@ -23,8 +23,15 @@ $value = static fn (string $field, $default = '') => old($field, $prefixe[$field
             <input class="form-control" id="prefixe" name="prefixe" value="<?= esc($value('prefixe')) ?>" placeholder="032" required>
         </div>
         <div class="mb-3">
-            <label class="form-label" for="operateur">Opérateur</label>
-            <input class="form-control" id="operateur" name="operateur" value="<?= esc($value('operateur')) ?>" required>
+            <label class="form-label" for="id_operateur">Opérateur</label>
+            <select class="form-select" id="id_operateur" name="id_operateur" required>
+                <option value="">Choisir un opérateur</option>
+                <?php foreach ($operateurs as $operateur): ?>
+                    <option value="<?= esc($operateur['id_operateur']) ?>" <?= (string) $value('id_operateur') === (string) $operateur['id_operateur'] ? 'selected' : '' ?>>
+                        <?= esc($operateur['nom']) ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
         </div>
         <div class="form-check form-switch">
             <input type="hidden" name="actif" value="0">

@@ -15,7 +15,6 @@
                 <a class="nav-link" href="/client">Mon compte</a>
                 <a class="nav-link" href="/client/depot">Dépôt</a>
                 <a class="nav-link" href="/client/retrait">Retrait</a>
-                <a class="nav-link" href="/client/transfert">Transfert</a>
                 <a class="nav-link" href="/client/envoi-multiple">Envoi multiple</a>
                 <a class="nav-link" href="/client/historique">Historique</a>
                 <a class="nav-link" href="/deconnexion">Déconnexion</a>
