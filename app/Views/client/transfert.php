@@ -50,8 +50,53 @@
                         </div>
                     </div>
 
+                    <div class="form-check mb-3">
+                        <input type="hidden" name="inclure_frais_retrait" value="0">
+                        <input
+                            class="form-check-input"
+                            id="inclure_frais_retrait"
+                            name="inclure_frais_retrait"
+                            type="checkbox"
+                            value="1"
+                            <?= old('inclure_frais_retrait') === '1' ? 'checked' : '' ?>
+                        >
+                        <label class="form-check-label" for="inclure_frais_retrait">Inclure les frais de retrait</label>
+                    </div>
+
+                    <?php if ($apercu !== null): ?>
+                        <div class="alert alert-info">
+                            <h2 class="h5">Aperçu du transfert</h2>
+                            <dl class="row mb-0">
+                                <dt class="col-sm-6">Opérateur destinataire</dt>
+                                <dd class="col-sm-6"><?= esc($apercu['operateur_destination']['nom']) ?></dd>
+
+                                <dt class="col-sm-6">Type</dt>
+                                <dd class="col-sm-6"><?= $apercu['transfert_externe'] ? 'Externe' : 'Interne' ?></dd>
+
+                                <dt class="col-sm-6">Montant envoyé</dt>
+                                <dd class="col-sm-6"><?= number_format((int) $apercu['montant'], 0, ',', ' ') ?> Ar</dd>
+
+                                <dt class="col-sm-6">Frais de transfert</dt>
+                                <dd class="col-sm-6"><?= number_format((int) $apercu['frais'], 0, ',', ' ') ?> Ar</dd>
+
+                                <dt class="col-sm-6">Frais de retrait inclus</dt>
+                                <dd class="col-sm-6"><?= number_format((int) $apercu['frais_retrait_inclus'], 0, ',', ' ') ?> Ar</dd>
+
+                                <dt class="col-sm-6">Montant reçu</dt>
+                                <dd class="col-sm-6"><?= number_format((int) $apercu['montant_recu'], 0, ',', ' ') ?> Ar</dd>
+
+                                <dt class="col-sm-6">Commission interopérateur</dt>
+                                <dd class="col-sm-6"><?= number_format((int) $apercu['commission_interoperateur'], 0, ',', ' ') ?> Ar</dd>
+
+                                <dt class="col-sm-6">Total débité</dt>
+                                <dd class="col-sm-6 fw-semibold"><?= number_format((int) $apercu['total_debit'], 0, ',', ' ') ?> Ar</dd>
+                            </dl>
+                        </div>
+                        <input type="hidden" name="confirmer" value="1">
+                    <?php endif; ?>
+
                     <div class="d-flex gap-2">
-                        <button class="btn btn-primary" type="submit">Valider le transfert</button>
+                        <button class="btn btn-primary" type="submit"><?= $apercu === null ? 'Voir le calcul' : 'Confirmer le transfert' ?></button>
                         <a class="btn btn-outline-secondary" href="/client">Annuler</a>
                     </div>
                 </form>

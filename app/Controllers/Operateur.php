@@ -343,12 +343,13 @@ class Operateur extends BaseController
         }
 
         $transferts = db_connect()->table('operations')
-            ->select('operations.*, source.numero_telephone AS numero_source, destination.numero_telephone AS numero_destination, source_client.nom AS nom_source, source_client.prenom AS prenom_source, destination_client.nom AS nom_destination, destination_client.prenom AS prenom_destination')
+            ->select('operations.*, source.numero_telephone AS numero_source, COALESCE(destination.numero_telephone, operations.numero_destinataire) AS numero_destination, source_client.nom AS nom_source, source_client.prenom AS prenom_source, destination_client.nom AS nom_destination, destination_client.prenom AS prenom_destination, operateur_destination.nom AS nom_operateur_destination')
             ->join('types_operations', 'types_operations.id_type_operation = operations.id_type_operation')
             ->join('comptes_mobile_money AS source', 'source.id_compte = operations.id_compte_source')
             ->join('clients AS source_client', 'source_client.id_client = source.id_client')
-            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination')
-            ->join('clients AS destination_client', 'destination_client.id_client = destination.id_client')
+            ->join('comptes_mobile_money AS destination', 'destination.id_compte = operations.id_compte_destination', 'left')
+            ->join('clients AS destination_client', 'destination_client.id_client = destination.id_client', 'left')
+            ->join('operateurs AS operateur_destination', 'operateur_destination.id_operateur = operations.id_operateur_destination', 'left')
             ->where('types_operations.code', 'transfert')
             ->orderBy('operations.created_at', 'DESC')
             ->orderBy('operations.id_operation', 'DESC')
@@ -439,9 +440,12 @@ class Operateur extends BaseController
 
     private function prefixeData(): array
     {
+        $operateur = trim((string) $this->request->getPost('operateur'));
+
         return [
+            'id_operateur' => $this->resolveOperateurId($operateur),
             'prefixe' => trim((string) $this->request->getPost('prefixe')),
-            'operateur' => trim((string) $this->request->getPost('operateur')),
+            'operateur' => $operateur,
             'actif' => (int) ($this->request->getPost('actif') === '1'),
         ];
     }
@@ -557,5 +561,24 @@ class Operateur extends BaseController
         }
 
         return null;
+    }
+
+    private function resolveOperateurId(string $nom): int
+    {
+        $db = db_connect();
+        $operateur = $db->table('operateurs')->where('nom', $nom)->get()->getRowArray();
+
+        if ($operateur !== null) {
+            return (int) $operateur['id_operateur'];
+        }
+
+        $db->table('operateurs')->insert([
+            'nom' => $nom,
+            'principal' => 0,
+            'commission_transfert_externe' => 0,
+            'actif' => 1,
+        ]);
+
+        return (int) $db->insertID();
     }
 }
