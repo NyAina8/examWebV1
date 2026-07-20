@@ -172,6 +172,29 @@ class Client extends BaseController
         ]);
     }
 
+    public function envoiMultiple()
+    {
+        $redirect = $this->exigerConnexion();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $compte = $this->mobileMoney->recupererCompteClient((int) session('compte_id'));
+
+        if ($compte === null) {
+            session()->destroy();
+
+            return redirect()->to('/connexion')->with('error', 'Votre compte est introuvable. Veuillez vous reconnecter.');
+        }
+
+        return view('client/envoi_multiple', [
+            'compte' => $compte,
+            'errors' => session('errors') ?? [],
+            'apercu' => session('apercu') ?? null,
+        ]);
+    }
+
     public function historique()
     {
         $redirect = $this->exigerConnexion();
@@ -323,6 +346,50 @@ class Client extends BaseController
             ->with('success', 'Transfert effectué avec succès.');
     }
 
+    public function enregistrerEnvoiMultiple()
+    {
+        $redirect = $this->exigerConnexion();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $destinataires = $this->normaliserListeNumeros((string) $this->request->getPost('destinataires'));
+        $montantTotal = $this->normaliserMontant((string) $this->request->getPost('montant_total'));
+        $inclureFraisRetrait = $this->request->getPost('inclure_frais_retrait') === '1';
+        $errors = $this->validerEnvoiMultiple($destinataires, $montantTotal);
+
+        if ($errors !== []) {
+            return redirect()->back()
+                ->withInput()
+                ->with('errors', $errors);
+        }
+
+        try {
+            $apercu = $this->mobileMoney->calculerEnvoiMultiple((int) session('compte_id'), $destinataires, (int) $montantTotal, $inclureFraisRetrait);
+
+            if ($this->request->getPost('confirmer') !== '1') {
+                return redirect()->back()
+                    ->withInput()
+                    ->with('apercu', $apercu);
+            }
+
+            $resultat = $this->mobileMoney->envoyerMultiple((int) session('compte_id'), $destinataires, (int) $montantTotal, $inclureFraisRetrait);
+        } catch (InvalidArgumentException | RuntimeException $exception) {
+            return redirect()->back()
+                ->withInput()
+                ->with('error', $exception->getMessage());
+        } catch (\Throwable) {
+            return redirect()->back()
+                ->withInput()
+                ->with('error', "L'envoi multiple n'a pas pu être enregistré.");
+        }
+
+        return view('client/envoi_multiple_detail', [
+            'resultat' => $resultat,
+        ]);
+    }
+
     public function detailRetrait(int $id)
     {
         $redirect = $this->exigerConnexion();
@@ -399,6 +466,14 @@ class Client extends BaseController
     private function normaliserMontant(string $montant): string
     {
         return preg_replace('/[\s]+/', '', trim($montant)) ?? '';
+    }
+
+    private function normaliserListeNumeros(string $numeros): array
+    {
+        return array_values(array_filter(array_map(
+            fn (string $numero): string => $this->normaliserNumero($numero),
+            preg_split('/[\s,;]+/', $numeros) ?: []
+        )));
     }
 
     private function validerMontantDepot(string $montant): array
@@ -481,6 +556,41 @@ class Client extends BaseController
 
         if ($numeroDestinataire === session('numero_telephone')) {
             $errors['numero_destinataire'] = 'Vous ne pouvez pas transférer vers votre propre numéro.';
+        }
+
+        return $errors;
+    }
+
+    private function validerEnvoiMultiple(array $destinataires, string $montantTotal): array
+    {
+        $errors = $this->validerMontantRetrait($montantTotal);
+
+        if ($destinataires === []) {
+            $errors['destinataires'] = 'Veuillez saisir au moins un destinataire.';
+
+            return $errors;
+        }
+
+        if (count($destinataires) !== count(array_unique($destinataires))) {
+            $errors['destinataires'] = 'Un même destinataire ne peut pas être saisi plusieurs fois.';
+        }
+
+        foreach ($destinataires as $numero) {
+            if (! preg_match('/^03[0-9]{8}$/', $numero)) {
+                $errors['destinataires'] = 'Chaque numéro doit contenir 10 chiffres et commencer par 03.';
+
+                return $errors;
+            }
+
+            if ($numero === session('numero_telephone')) {
+                $errors['destinataires'] = 'Votre propre numéro ne peut pas faire partie des destinataires.';
+
+                return $errors;
+            }
+        }
+
+        if ($montantTotal !== '' && ctype_digit($montantTotal) && $destinataires !== [] && (int) $montantTotal % count(array_unique($destinataires)) !== 0) {
+            $errors['montant_total'] = "Le montant total doit être divisible exactement par le nombre de destinataires.";
         }
 
         return $errors;

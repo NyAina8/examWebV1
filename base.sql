@@ -10,6 +10,7 @@ DROP TABLE IF EXISTS operateurs;
 
 CREATE TABLE operateurs (
     id_operateur INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
     nom TEXT NOT NULL UNIQUE,
     principal INTEGER NOT NULL DEFAULT 0 CHECK (principal IN (0, 1)),
     commission_transfert_externe REAL NOT NULL DEFAULT 0 CHECK (commission_transfert_externe >= 0),
@@ -136,11 +137,11 @@ CREATE INDEX idx_operations_destination_date ON operations(id_compte_destination
 CREATE INDEX idx_operations_type ON operations(id_type_operation);
 CREATE INDEX idx_operations_operateurs ON operations(id_operateur_source, id_operateur_destination);
 
-INSERT INTO operateurs (id_operateur, nom, principal, commission_transfert_externe, actif) VALUES
-    (1, 'MVola', 1, 0, 1),
-    (2, 'Orange Money', 0, 2.5, 1),
-    (3, 'Airtel Money', 0, 2, 1),
-    (4, 'Telma Money', 0, 1.5, 1);
+INSERT INTO operateurs (id_operateur, code, nom, principal, commission_transfert_externe, actif) VALUES
+    (1, 'MVOLA', 'MVola', 1, 0, 1),
+    (2, 'OM', 'Orange Money', 0, 2.5, 1),
+    (3, 'AIRTEL', 'Airtel Money', 0, 2, 1),
+    (4, 'TELMA', 'Telma Money', 0, 1.5, 1);
 
 INSERT INTO prefixes_telephoniques (id_prefixe, id_operateur, prefixe, operateur) VALUES
     (1, 2, '032', 'Orange Money'),
