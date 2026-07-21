@@ -72,7 +72,9 @@ CREATE TABLE comptes_mobile_money (
     FOREIGN KEY (id_prefixe) REFERENCES prefixes_telephoniques(id_prefixe)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
-    CHECK (numero_telephone GLOB '03[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]')
+    CHECK (numero_telephone GLOB '03[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
+    pourcentage_epargne INTEGER NOT FULL DEFAULT 0 check (pourcentage_epargne >= 0 and  pourcentage_epargne <= 100),
+    solde_epargne  INTEGER NOT FULL DEFAULT 0 check (solde_epargne >= 0)
 );
 
 CREATE TABLE baremes_frais (

@@ -479,10 +479,21 @@ class MobileMoneyService
             }
 
             if ($destinataire !== null) {
-                $creditEffectue = $this->comptes->update($destinataire['id_compte'], ['solde' => $nouveauSoldeDestinataire]);
+                $pourcentageEpargne = (int) ($destinataire['pourcentage_epargne'] ?? 0);
+                $ancienSoldeEpargne = (int) ($destinataire['solde_epargne' ?? 0]);
 
-                if (! $creditEffectue) {
-                    throw new RuntimeException("Le solde du destinataire n'a pas pu être mis à jour.");
+                $montantEpargne = (int) round($calcul['montant_reçu']*($pourcentageEpargne /100));
+                $montantDisponible = (int) $calcul['montant_reçu'] - $montantEpargne;
+
+                $nouveauSoldeDestinataire = (int) $destinataire['solde'] + $montantDisponible;
+                $nouveauSoldeEpargne = $ancienSoldeEpargne + $montantEpargne;
+
+                $creditEffectue = $this->comptes->update($destinataire['id_compte'],[
+                    'solde' => $nouveauSoldeDestinataire,
+                    'solde_epargne' => $nouveauSoldeEpargne,
+                ]);
+                if(!$creditEffectue){
+                    throw new RuntimeExeption("le solde du destinataire n'a pas pu etre mis a jour");
                 }
             }
 
@@ -611,10 +622,21 @@ class MobileMoneyService
                 $nouveauSoldeDestinataire = null;
 
                 if ($destinataire !== null) {
-                    $nouveauSoldeDestinataire = (int) $destinataire['solde'] + (int) $transfert['montant_recu'];
+                    $pourcentageEpargne = (int) ($destinataire['pourcentage_epargne'] ?? 0);
+                    $ancienSoldeEpargne = (int) ($destinataire['solde_epargne' ?? 0]);
 
-                    if (! $this->comptes->update($destinataire['id_compte'], ['solde' => $nouveauSoldeDestinataire])) {
-                        throw new RuntimeException("Le solde d'un destinataire n'a pas pu être mis à jour.");
+                    $montantEpargne = (int) round($calcul['montant_reçu']*($pourcentageEpargne /100));
+                    $montantDisponible = (int) $calcul['montant_reçu'] - $montantEpargne;
+
+                    $nouveauSoldeDestinataire = (int) $destinataire['solde'] + $montantDisponible;
+                    $nouveauSoldeEpargne = $ancienSoldeEpargne + $montantEpargne;
+
+                    $creditEffectue = $this->comptes->update($destinataire['id_compte'],[
+                        'solde' => $nouveauSoldeDestinataire,
+                        'solde_epargne' => $nouveauSoldeEpargne,
+                    ]);
+                    if(!$creditEffectue){
+                        throw new RuntimeExeption("le solde du destinataire n'a pas pu etre mis a jour");
                     }
                 }
 

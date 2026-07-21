@@ -15,6 +15,8 @@ class CompteMobileMoneyModel extends Model
         'numero_telephone',
         'solde',
         'statut',
+        'pourcentage_epargne',
+        'solde_epargne',
     ];
     protected $useTimestamps = true;
     protected $createdField = 'created_at';
