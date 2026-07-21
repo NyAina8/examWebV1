@@ -63,6 +63,8 @@ CREATE TABLE comptes_mobile_money (
     id_prefixe INTEGER NOT NULL,
     numero_telephone TEXT NOT NULL UNIQUE,
     solde INTEGER NOT NULL DEFAULT 0 CHECK (solde >= 0),
+    pourcentage_epargne INTEGER NOT NULL DEFAULT 0 CHECK (pourcentage_epargne >= 0 AND pourcentage_epargne <= 100),
+    solde_epargne INTEGER NOT NULL DEFAULT 0 CHECK (solde_epargne >= 0),
     statut TEXT NOT NULL DEFAULT 'actif' CHECK (statut IN ('actif', 'bloque')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT,
@@ -72,9 +74,7 @@ CREATE TABLE comptes_mobile_money (
     FOREIGN KEY (id_prefixe) REFERENCES prefixes_telephoniques(id_prefixe)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
-    CHECK (numero_telephone GLOB '03[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'),
-    pourcentage_epargne INTEGER NOT FULL DEFAULT 0 check (pourcentage_epargne >= 0 and  pourcentage_epargne <= 100),
-    solde_epargne  INTEGER NOT FULL DEFAULT 0 check (solde_epargne >= 0)
+    CHECK (numero_telephone GLOB '03[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]')
 );
 
 CREATE TABLE baremes_frais (

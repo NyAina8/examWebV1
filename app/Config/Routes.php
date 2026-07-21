@@ -21,8 +21,8 @@ $routes->get('client/retrait/(:num)', 'Client::detailRetrait/$1');
 $routes->get('client/envoi-multiple', 'Client::envoiMultiple');
 $routes->post('client/envoi-multiple', 'Client::enregistrerEnvoiMultiple');
 $routes->get('client/historique', 'Client::historique');
-$routes->get('client/epargne', 'client::epargne');
-$routes->post('client/epargne', 'client::modifierEpargne');
+$routes->get('client/epargne', 'Client::epargne');
+$routes->post('client/epargne', 'Client::modifierEpargne');
 
 $routes->group('operateur', ['namespace' => 'App\Controllers'], static function ($routes) {
     $routes->get('/', 'Operateur::index');

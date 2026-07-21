@@ -2,6 +2,7 @@
 
 namespace App\Controllers;
 
+use App\Models\CompteMobileMoneyModel;
 use App\Models\PrefixeTelephoniqueModel;
 use App\Services\MobileMoneyService;
 use InvalidArgumentException;
@@ -12,11 +13,13 @@ class Client extends BaseController
     private const ADMIN_NUMERO = '0000000000';
 
     private MobileMoneyService $mobileMoney;
+    private CompteMobileMoneyModel $comptes;
     private PrefixeTelephoniqueModel $prefixes;
 
     public function __construct()
     {
         $this->mobileMoney = new MobileMoneyService();
+        $this->comptes = new CompteMobileMoneyModel();
         $this->prefixes = new PrefixeTelephoniqueModel();
     }
 
@@ -211,6 +214,56 @@ class Client extends BaseController
             'solde' => $this->mobileMoney->consulterSolde((int) $compte['id_compte']),
             'evolution' => $this->mobileMoney->recupererEvolutionSoldeClient((int) $compte['id_compte']),
         ]);
+    }
+
+    public function epargne()
+    {
+        $redirect = $this->exigerConnexion();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $compte = $this->mobileMoney->recupererCompteClient((int) session('compte_id'));
+
+        if ($compte === null) {
+            session()->destroy();
+
+            return redirect()->to('/connexion')->with('error', 'Votre compte est introuvable. Veuillez vous reconnecter.');
+        }
+
+        return view('client/epargne', [
+            'compte' => $compte,
+            'errors' => session('errors') ?? [],
+        ]);
+    }
+
+    public function modifierEpargne()
+    {
+        $redirect = $this->exigerConnexion();
+
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        $pourcentage = trim((string) $this->request->getPost('pourcentage_epargne'));
+
+        if ($pourcentage === '' || ! ctype_digit($pourcentage) || (int) $pourcentage < 0 || (int) $pourcentage > 100) {
+            return redirect()->back()
+                ->withInput()
+                ->with('errors', ['pourcentage_epargne' => 'Le pourcentage doit être compris entre 0 et 100.']);
+        }
+
+        if (! $this->comptes->update((int) session('compte_id'), [
+            'pourcentage_epargne' => (int) $pourcentage,
+        ])) {
+            return redirect()->back()
+                ->withInput()
+                ->with('error', "Le pourcentage d'épargne n'a pas pu être modifié.");
+        }
+
+        return redirect()->to('/client/epargne')
+            ->with('success', "Pourcentage d'épargne mis à jour.");
     }
 
     public function enregistrerDepot()

@@ -480,7 +480,7 @@ class MobileMoneyService
 
             if ($destinataire !== null) {
                 $pourcentageEpargne = (int) ($destinataire['pourcentage_epargne'] ?? 0);
-                $ancienSoldeEpargne = (int) ($destinataire['solde_epargne' ?? 0]);
+                $ancienSoldeEpargne = (int) ($destinataire['solde_epargne'] ?? 0);
 
                 $montantEpargne = (int) round($calcul['montant_reçu']*($pourcentageEpargne /100));
                 $montantDisponible = (int) $calcul['montant_reçu'] - $montantEpargne;
@@ -623,7 +623,7 @@ class MobileMoneyService
 
                 if ($destinataire !== null) {
                     $pourcentageEpargne = (int) ($destinataire['pourcentage_epargne'] ?? 0);
-                    $ancienSoldeEpargne = (int) ($destinataire['solde_epargne' ?? 0]);
+                    $ancienSoldeEpargne = (int) ($destinataire['solde_epargne'] ?? 0);
 
                     $montantEpargne = (int) round($calcul['montant_reçu']*($pourcentageEpargne /100));
                     $montantDisponible = (int) $calcul['montant_reçu'] - $montantEpargne;
